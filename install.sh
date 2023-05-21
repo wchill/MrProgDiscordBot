@@ -11,6 +11,14 @@ appendfile() {
 sudo apt update
 sudo apt install -y git build-essential vim python3-pip
 
+read -p -r "Set current hostname to: ", HOSTNAME
+read -p -r "AMQP/MQTT host: ", HOST
+read -p -r "AMQP/MQTT username: ", USERNAME
+read -p -r "AMQP/MQTT password: ", PASSWORD
+read -p -r "Discord bot token: ", TOKEN
+
+sudo hostnamectl set-hostname "$HOSTNAME"
+
 # install tailscale
 curl -fsSL https://tailscale.com/install.sh | sh
 tailscale up
@@ -28,10 +36,6 @@ if [[ ! -d "$DIR/venv" ]] ; then
   "$DIR/venv/bin/python" -m pip install -e "$DIR/MrProgDiscordBot"
 fi
 
-read -p -r "AMQP/MQTT host: ", HOST
-read -p -r "AMQP/MQTT username: ", USERNAME
-read -p -r "AMQP/MQTT password: ", PASSWORD
-read -p -r "Discord bot token: ", TOKEN
 
 UNITFILE='/etc/systemd/system/discord-bot.service'
 STARTUP_CMD="$DIR/venv/bin/python $DIR/MrProgDiscordBot/mrprog/bot/bot.py --host $HOST --username $USERNAME --password $PASSWORD --token $TOKEN"
