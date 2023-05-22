@@ -11,11 +11,11 @@ appendfile() {
 sudo apt update
 sudo apt install -y git build-essential vim python3-pip
 
-read -p -r "Set current hostname to: ", HOSTNAME
-read -p -r "AMQP/MQTT host: ", HOST
-read -p -r "AMQP/MQTT username: ", USERNAME
-read -p -r "AMQP/MQTT password: ", PASSWORD
-read -p -r "Discord bot token: ", TOKEN
+read -p "Set current hostname to: " -r HOSTNAME
+read -p "AMQP/MQTT host: " -r HOST
+read -p "AMQP/MQTT username: " -r USERNAME
+read -p "AMQP/MQTT password: " -r -s PASSWORD
+read -p "Discord bot token: " -r -s TOKEN
 
 sudo hostnamectl set-hostname "$HOSTNAME"
 
