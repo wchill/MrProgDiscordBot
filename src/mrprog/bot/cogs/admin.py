@@ -1,6 +1,7 @@
 import asyncio
 import datetime
 import json
+import logging
 import math
 import os
 import platform
@@ -14,8 +15,9 @@ from discord import app_commands
 from discord.ext import commands
 
 from .. import utils
-from ..utils import MessageReaction
+from ..utils import MessageReaction, owner_only
 
+logger = logging.getLogger(__name__)
 RESTART_FILE = os.path.expanduser("~/.bot_restarted")
 
 
@@ -39,7 +41,7 @@ class AdminCog(commands.Cog, name="Admin"):
                 discord_message = await discord_channel.fetch_message(message_info["message_id"])
                 await discord_message.reply("Successfully restarted!")
             os.unlink(RESTART_FILE)
-        print("Admin cog successfully loaded")
+        logger.debug("Admin cog successfully loaded")
 
     @commands.command()
     @commands.guild_only()
@@ -80,7 +82,8 @@ class AdminCog(commands.Cog, name="Admin"):
     reload_parent_command = app_commands.Group(name="reload", description="...")
 
     @reload_parent_command.command(name="cog")
-    @commands.is_owner()
+    @app_commands.guild_only()
+    @owner_only()
     async def reload_cog(self, interaction: discord.Interaction, cog_name: str) -> None:
         await interaction.response.defer()
         try:
@@ -94,7 +97,8 @@ class AdminCog(commands.Cog, name="Admin"):
         return [app_commands.Choice(name=name, value=name) for name in self.bot.extensions.keys()]
 
     @reload_parent_command.command(name="allcogs")
-    @commands.is_owner()
+    @app_commands.guild_only()
+    @owner_only()
     async def reload_all_cogs(self, interaction: discord.Interaction):
         cogs = list(self.bot.cogs.keys())
         await interaction.defer()
@@ -108,7 +112,8 @@ class AdminCog(commands.Cog, name="Admin"):
         await interaction.followup.send(content=f'Successfully reloaded {len(cogs)} cogs: "{cogs_list}"')
 
     @reload_parent_command.command(name="bot")
-    @commands.is_owner()
+    @app_commands.guild_only()
+    @owner_only()
     async def reload_bot(self, ctx: commands.Context):
         await ctx.message.add_reaction(MessageReaction.OK.value)
         await ctx.reply("Restarting the bot now!")
@@ -117,7 +122,8 @@ class AdminCog(commands.Cog, name="Admin"):
         os.system("systemctl restart discord-bot")
 
     @reload_parent_command.command(name="system")
-    @commands.is_owner()
+    @app_commands.guild_only()
+    @owner_only()
     async def reload_system(self, ctx: commands.Context):
         await ctx.message.add_reaction(MessageReaction.OK.value)
         await ctx.reply("Restarting the bot now!")
@@ -126,7 +132,8 @@ class AdminCog(commands.Cog, name="Admin"):
         os.system("reboot")
 
     @reload_parent_command.command(name="code")
-    @commands.is_owner()
+    @app_commands.guild_only()
+    @owner_only()
     async def update(self, ctx: commands.Context):
         await ctx.message.add_reaction(MessageReaction.OK.value)
         await ctx.reply("Updating the bot now!")
@@ -172,70 +179,63 @@ class AdminCog(commands.Cog, name="Admin"):
         return json.loads(data, object_hook=_utf_to_str)
 
     @app_commands.command()
-    @commands.is_owner()
+    @app_commands.guild_only()
     async def botstatus(self, interaction: discord.Interaction):
-        try:
-            load1, load5, load15 = psutil.getloadavg()
-            virt_mem = psutil.virtual_memory()
-            disk_usage = psutil.disk_usage(os.path.abspath("."))
+        load1, load5, load15 = psutil.getloadavg()
+        virt_mem = psutil.virtual_memory()
+        disk_usage = psutil.disk_usage(os.path.abspath("."))
 
-            creation_time = psutil.Process(os.getpid()).create_time()
-            boot_time = psutil.boot_time()
-            unix_timestamp = (datetime.datetime.utcnow() - datetime.datetime(1970, 1, 1)).total_seconds()
-            uptime = math.floor(unix_timestamp - creation_time)
-            system_uptime = math.floor(unix_timestamp - boot_time)
+        creation_time = psutil.Process(os.getpid()).create_time()
+        boot_time = psutil.boot_time()
+        unix_timestamp = (datetime.datetime.utcnow() - datetime.datetime(1970, 1, 1)).total_seconds()
+        uptime = math.floor(unix_timestamp - creation_time)
+        system_uptime = math.floor(unix_timestamp - boot_time)
 
-            cpu_info = await self.run_cpuinfo()
-            soc = cpu_info.get("hardware_raw")
-            cpu_name = cpu_info.get("brand_raw")
-            display_cpu_name = f"{soc} ({cpu_name})" if soc else cpu_name
-            architecture = platform.uname().machine
-            python_ver = cpu_info.get("python_version")
-            clock_speed = cpu_info.get("hz_actual_friendly")
+        cpu_info = await self.run_cpuinfo()
+        soc = cpu_info.get("hardware_raw")
+        cpu_name = cpu_info.get("brand_raw")
+        display_cpu_name = f"{soc} ({cpu_name})" if soc else cpu_name
+        architecture = platform.uname().machine
+        python_ver = cpu_info.get("python_version")
+        clock_speed = cpu_info.get("hz_actual_friendly")
 
-            core_count = psutil.cpu_count(False)
-            thread_count = psutil.cpu_count()
+        core_count = psutil.cpu_count(False)
+        thread_count = psutil.cpu_count()
 
-            if platform.system() == "Windows":
-                output = await utils.run_shell(
-                    'powershell.exe -c "Get-CimInstance Win32_OperatingSystem | Select Caption, Version | ConvertTo-Json"'
-                )
-                data = json.loads(output)
-                os_name = data["Caption"]
-                os_build = data["Version"]
-            else:
-                uname = platform.uname()
-                os_name = f"{uname.system} {uname.release}"
-                os_build = uname.version
-
-            git_version = (await utils.run_shell("git describe --always", cwd=os.path.dirname(__file__))).strip()
-
-            embed = discord.Embed(title="Bot status")
-            embed.add_field(name="Hostname", value=platform.node())
-            embed.add_field(name="OS", value=f"{os_name}")
-            embed.add_field(name="OS build", value=os_build)
-            embed.add_field(
-                name="CPU",
-                value=f"{display_cpu_name} ({architecture}, {clock_speed}, {core_count} cores, {thread_count} threads)",
+        if platform.system() == "Windows":
+            output = await utils.run_shell(
+                'powershell.exe -c "Get-CimInstance Win32_OperatingSystem | Select Caption, Version | ConvertTo-Json"'
             )
-            embed.add_field(name="CPU usage", value=f"Load average (1/5/15 min):\n{load1}, {load5}, {load15}")
-            embed.add_field(
-                name="Memory usage", value=f"{virt_mem[3]/(1024 ** 2):.2f}/{virt_mem[0]/(1024 ** 2):.2f} MB"
-            )
-            embed.add_field(
-                name="Disk usage", value=f"{disk_usage.used/(1024 ** 3):.2f}/{disk_usage.total/(1024 ** 3):.2f} GB"
-            )
-            embed.add_field(name="Python version", value=python_ver)
-            embed.add_field(name="Discord.py version", value=discord.__version__)
-            embed.add_field(name="Bot version (git)", value=git_version)
-            embed.add_field(name="Bot uptime", value=str(datetime.timedelta(seconds=uptime)))
-            embed.add_field(name="System uptime", value=str(datetime.timedelta(seconds=system_uptime)))
+            data = json.loads(output)
+            os_name = data["Caption"]
+            os_build = data["Version"]
+        else:
+            uname = platform.uname()
+            os_name = f"{uname.system} {uname.release}"
+            os_build = uname.version
 
-            await interaction.response.send_message(embed=embed)
-        except Exception:
-            import traceback
+        git_version = (await utils.run_shell("git describe --always", cwd=os.path.dirname(__file__))).strip()
 
-            traceback.print_exc()
+        embed = discord.Embed(title="Bot status")
+        embed.add_field(name="Hostname", value=platform.node())
+        embed.add_field(name="OS", value=f"{os_name}")
+        embed.add_field(name="OS build", value=os_build)
+        embed.add_field(
+            name="CPU",
+            value=f"{display_cpu_name} ({architecture}, {clock_speed}, {core_count} cores, {thread_count} threads)",
+        )
+        embed.add_field(name="CPU usage", value=f"Load average (1/5/15 min):\n{load1}, {load5}, {load15}")
+        embed.add_field(name="Memory usage", value=f"{virt_mem[3]/(1024 ** 2):.2f}/{virt_mem[0]/(1024 ** 2):.2f} MB")
+        embed.add_field(
+            name="Disk usage", value=f"{disk_usage.used/(1024 ** 3):.2f}/{disk_usage.total/(1024 ** 3):.2f} GB"
+        )
+        embed.add_field(name="Python version", value=python_ver)
+        embed.add_field(name="Discord.py version", value=discord.__version__)
+        embed.add_field(name="Bot version (git)", value=git_version)
+        embed.add_field(name="Bot uptime", value=str(datetime.timedelta(seconds=uptime)))
+        embed.add_field(name="System uptime", value=str(datetime.timedelta(seconds=system_uptime)))
+
+        await interaction.response.send_message(embed=embed)
 
 
 async def setup(bot: commands.Bot) -> None:

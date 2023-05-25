@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import logging
 
 import discord
 from discord.ext import commands
 from mrprog.utils.logging import install_logger
 
+logger = logging.getLogger(__name__)
 COGS = ["info", "admin", "trade"]
 
 
@@ -14,12 +16,11 @@ class MrProgBot(discord.ext.commands.Bot):
     def __init__(self):
         intents = discord.Intents.default()
         intents.message_content = True
-        self.guild = discord.Object(id=741898427000029256)
 
         super().__init__(command_prefix="!", owner_id=174603401479323649, intents=intents)
 
     async def on_ready(self):
-        print(f"Connected to {len(self.guilds)} servers")
+        logger.info(f"Connected to {len(self.guilds)} servers")
 
 
 bot = MrProgBot()
@@ -31,14 +32,17 @@ async def main():
     parser.add_argument("--username")
     parser.add_argument("--password")
     parser.add_argument("--token")
-    parser.parse_args()
+    args = parser.parse_args()
 
-    install_logger(parser.host, parser.username, parser.password)
-    bot.config = {"host": parser.host, "username": parser.username, "password": parser.password}
+    install_logger(args.host, args.username, args.password)
+    bot.config = {"host": args.host, "username": args.username, "password": args.password}
 
-    await bot.login(parser.token)
+    logger.info("Logging in")
+    await bot.login(args.token)
     for ext in COGS:
+        logger.info(f"Loading {ext}")
         await bot.load_extension(f"mrprog.bot.cogs.{ext}")
+    logger.info(f"Connecting")
     await bot.connect()
 
 

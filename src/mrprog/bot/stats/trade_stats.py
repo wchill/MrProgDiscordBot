@@ -1,8 +1,11 @@
 import collections
+import logging
 import pickle
 from typing import Dict, List, Tuple
 
 from mrprog.utils.types import TradeItem
+
+logger = logging.getLogger(__name__)
 
 
 class UserTradeStats:
@@ -61,8 +64,10 @@ class BotTradeStats:
 
     @classmethod
     def load_or_default(cls, path: str) -> "BotTradeStats":
+        logger.debug(f"Loading bot stats from {path}")
         try:
             with open(path, "rb") as f:
                 return pickle.load(f)
         except FileNotFoundError:
+            logger.debug("Bot stats don't exist, creating a new one")
             return cls()

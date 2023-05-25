@@ -13,6 +13,8 @@ from mrprog.bot.utils import Emotes
 
 from .. import autocomplete
 
+logger = logging.getLogger(__name__)
+
 
 class InfoCog(commands.Cog, name="Info"):
     def __init__(self, bot: commands.Bot):
@@ -22,7 +24,7 @@ class InfoCog(commands.Cog, name="Info"):
 
     @commands.Cog.listener()
     async def on_ready(self):
-        print("Info cog successfully loaded")
+        logger.debug("Info cog successfully loaded")
 
     @app_commands.command(description="Lists all the chips that come in a particular code in the chosen game.")
     async def chipcode(self, interaction: discord.Interaction, game: SupportedGameLiteral, chip_code: str):
@@ -41,7 +43,7 @@ class InfoCog(commands.Cog, name="Info"):
                 matching_chips.append(chip)
 
         embed = discord.Embed(
-            title=f"Chips in {chip_code.upper()} code",
+            title=f"BN{game} chips in {chip_code.upper()} code",
             color=Colour.gold(),
             description=", ".join([chip.name for chip in matching_chips]),
         )
@@ -55,7 +57,6 @@ class InfoCog(commands.Cog, name="Info"):
             await interaction.response.send_message(f"{Emotes.ERROR} That chip doesn't exist.", ephemeral=True)
             return
 
-        # TODO: Get chip artwork
         chip = chips[0]
         embed = discord.Embed(title=f"{chip.name} (BN{game})")
 
@@ -114,7 +115,7 @@ class InfoCog(commands.Cog, name="Info"):
                 text.append(part.name)
 
         embed = discord.Embed(
-            title=f"{actual_color.value} {actual_color.name} NaviCust parts",
+            title=f"{actual_color.value} BN{game} {actual_color.name} NaviCust parts",
             color=Colour.from_rgb(*COLORS[actual_color.name]),
             description="\n".join(text),
         )

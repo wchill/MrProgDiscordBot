@@ -1,36 +1,44 @@
 import asyncio
+import collections
 import io
 import json
-from typing import Optional
+import logging
+import re
+from typing import Dict, Optional
 
 import discord
 from discord import app_commands
+from discord.app_commands import AppCommandError
 from discord.ext import commands, tasks
 from mmbn.gamedata.chip import Code
-from mmbn.gamedata.navicust_part import ColorLiteral
-from mrprog.utils.supported_games import GAME_INFO, SupportedGameLiteral
+from mrprog.utils.supported_games import (
+    GAME_INFO,
+    SupportedGameLiteral,
+    SupportedPlatformLiteral,
+)
+from mrprog.utils.trade import TradeRequest
 from mrprog.utils.types import TradeItem
 
 from mrprog.bot import autocomplete
 from mrprog.bot.rpc_client import TradeRequestRpcClient, TradeResponse
 from mrprog.bot.stats.trade_stats import BotTradeStats
-from mrprog.bot.utils import Emotes
+from mrprog.bot.utils import Emotes, owner_only
 
-CHANNEL_IDS = {1109759453147967529}
-
-
-def in_channel_check(ctx: commands.Context):
-    return ctx.channel.id in CHANNEL_IDS
+logger = logging.getLogger(__name__)
 
 
-in_channel = commands.check(in_channel_check)
+class RequestGroup(app_commands.Group):
+    def __init__(self):
+        super().__init__(name="request", description="...", guild_only=True)
 
 
 class TradeCog(commands.Cog, name="Trade"):
+    request_group = RequestGroup()
+
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-        self.trade_request_rpc_client = TradeRequestRpcClient("bn-orchestrator", "worker", "worker")
+        self.trade_request_rpc_client = None
         self.bot_stats = None
 
         self.channel_ids = set()
@@ -48,46 +56,70 @@ class TradeCog(commands.Cog, name="Trade"):
                 ),
             )
 
+    @tasks.loop(seconds=10)
+    async def update_queue(self):
+        if self.bot.is_ready():
+            embed = self._make_queue_embed()
+            await self.queue_message.edit(content="", embed=embed)
+
     async def cog_load(self) -> None:
         self.bot_stats = BotTradeStats.load_or_default("bot_stats.pkl")
         self.change_status.start()
+        self.update_queue.start()
+
+        self.trade_request_rpc_client = TradeRequestRpcClient(
+            "bn-orchestrator", "worker", "worker", self.message_room_code, self.handle_trade_update
+        )
 
         await self.trade_request_rpc_client.connect()
-        config = json.loads(await self.trade_request_rpc_client.get_retained_message_from_topic("bot/config"))
+        config_bytestring = await self.trade_request_rpc_client.wait_for_message("bot/config")
+        config = json.loads(config_bytestring.decode("utf-8"))
 
-        channel = await self.bot.fetch_channel(config["queue_message_channel"])
-        if config["queue_message_id"] is not None:
+        channel = await self.bot.fetch_channel(int(config["queue_message_channel"]))
+        embed = self._make_queue_embed()
+        if config.get("queue_message_id") is not None:
             try:
                 queue_message_id = int(config["queue_message_id"])
                 self.queue_message = await channel.fetch_message(queue_message_id)
+                await self.queue_message.edit(content="", embed=embed)
+                logger.debug("Trade cog successfully loaded")
                 return
             except Exception:
                 pass
-        else:
-            embed = self._make_queue_embed()
-            self.queue_message = await channel.send(embed=embed)
-            config["queue_message_id"] = str(self.queue_message.id)
 
-            await self.trade_request_rpc_client.publish_retained_message("bot/config", json.dumps(config))
+        self.queue_message = await channel.send(embed=embed)
+        config["queue_message_id"] = str(self.queue_message.id)
+
+        await self.trade_request_rpc_client.publish_retained_message("bot/config", json.dumps(config))
+        logger.debug("Trade cog successfully loaded")
 
     async def cog_unload(self) -> None:
         await self.trade_request_rpc_client.disconnect()
         self.bot_stats.save("bot_stats.pkl")
 
-    def _make_queue_embed(self, requested_user: Optional[discord.User] = None) -> discord.Embed:
-        queued, in_progress = self.trade_request_rpc_client.get_current_queue()
+    async def cog_app_command_error(self, interaction: discord.Interaction, error: AppCommandError):
+        import traceback
 
-        lines = []
-        count = 0
-        for user_id, request in queued:
-            if count >= 30:
-                break
-            count += 1
-            lines.append(f"{count}. {request.user_name} ({request.user_id}) - {request.trade_item}")
-        embed = discord.Embed(
-            title=f"Current queue ({len(queued)})",
-            description="\n".join(lines) if lines else "No queued trades",
-        )
+        logger.exception(traceback.format_exception(error))
+
+    def _make_queue_embed(self, requested_user: Optional[discord.User] = None) -> discord.Embed:
+        queued, in_progress, _ = self.trade_request_rpc_client.get_current_queue()
+
+        fields = collections.defaultdict(list)
+        for correlation_id, request in queued:
+            lines = fields[(request.system, request.game)]
+            count = len(lines)
+
+            if count >= 20:
+                continue
+
+            lines.append(f"{count}. <@{request.user_id}> - `{request.trade_item}`")
+
+        embed = discord.Embed(title=f"Current queue ({len(queued)})")
+
+        for (system, game), lines in sorted(fields.items(), key=lambda kv: kv[0]):
+            system_emote = Emotes.STEAM if system == "steam" else Emotes.SWITCH
+            embed.add_field(name=f"{system_emote} BN{game} ({len(lines)})", value="\n".join(lines))
 
         lines = []
         count = 0
@@ -96,10 +128,11 @@ class TradeCog(commands.Cog, name="Trade"):
                 break
             count += 1
             request = response.request
+            system_emote = Emotes.STEAM if request.system == "steam" else Emotes.SWITCH
             lines.append(
-                f"{count}. <@{request.user_id}> - (BN{request.game}) `{request.trade_item}` ({response.worker_id})"
+                f"{count}. <@{request.user_id}> - `{request.trade_item}` ({system_emote} BN{request.game}, worker {response.worker_id[:8]})"
             )
-        embed.add_field(name="In progress", value="\n".join(lines) if lines else "No one")
+        embed.add_field(name="In progress", value="\n".join(lines) if lines else "No one", inline=False)
 
         if requested_user is not None:
             for idx, (user_id, response) in enumerate(queued):
@@ -113,38 +146,43 @@ class TradeCog(commands.Cog, name="Trade"):
                     if requested_user.id == user_id:
                         embed.set_footer(text="Your trade is in progress", icon_url=requested_user.display_avatar.url)
                         break
+        else:
+            embed.set_footer(text="This message updates every 10 seconds")
 
         return embed
 
-    async def update_queue_message(self):
-        embed = self._make_queue_embed()
-        asyncio.run_coroutine_threadsafe(self.queue_message.edit(content="", embed=embed), self.bot.loop)
+    async def handle_trade_update(self, trade_response: TradeResponse):
+        try:
+            await self.bot.wait_until_ready()
+            discord_channel = self.bot.get_channel(trade_response.request.channel_id)
 
-    async def handle_trade_complete(self, trade_response: TradeResponse):
-        discord_channel = self.bot.get_channel(trade_response.request.channel_id)
+            if trade_response.message or trade_response.embed or trade_response.image:
+                emote = Emotes.OK if trade_response.status == TradeResponse.SUCCESS else Emotes.ERROR
+                img = None
+                content = None
+                embed = None
 
-        if trade_response.message or trade_response.embed:
-            emote = Emotes.OK if trade_response.status == TradeResponse.SUCCESS else Emotes.ERROR
-            img = None
-            content = None
-            embed = None
+                if trade_response.image:
+                    img = discord.File(fp=io.BytesIO(trade_response.image), filename="image.png")
 
-            if trade_response.image:
-                img = discord.File(fp=io.BytesIO(trade_response.image), filename="image.png")
+                if trade_response.message:
+                    if trade_response.status in [TradeResponse.FAILURE, TradeResponse.CRITICAL_FAILURE]:
+                        content = f"{emote} <@{trade_response.request.user_id}>: {trade_response.message}\n\n<@{self.bot.owner_id}>"
+                    else:
+                        content = f"{emote} <@{trade_response.request.user_id}>: {trade_response.message}"
 
-            if trade_response.message:
-                if trade_response.status in [TradeResponse.FAILURE, TradeResponse.CRITICAL_FAILURE]:
-                    content = f"{emote} <@{trade_response.request.user_id}>: {trade_response.message}\n\n<@{self.bot.owner_id}>"
-                else:
-                    content = f"{emote} <@{trade_response.request.user_id}>: {trade_response.message}"
+                if trade_response.embed:
+                    embed = discord.Embed.from_dict(trade_response.embed)
 
-            if trade_response.embed:
-                embed = discord.Embed.from_dict(trade_response.embed)
+                await discord_channel.send(content=content, embed=embed, file=img)
 
-            await discord_channel.send(content=content, embed=embed, file=img)
+            if trade_response.status == TradeResponse.SUCCESS:
+                self.bot_stats.add_trade(trade_response.request.user_id, trade_response.request.trade_item)
+                self.bot_stats.save("bot_stats.pkl")
+        except Exception:
+            import traceback
 
-        if trade_response.status == TradeResponse.SUCCESS:
-            self.bot_stats.add_trade(trade_response.request.user_id, trade_response.request.trade_item)
+            traceback.print_exc()
 
     async def message_room_code(self, trade_response: TradeResponse):
         user = await self.bot.fetch_user(trade_response.request.user_id)
@@ -154,40 +192,47 @@ class TradeCog(commands.Cog, name="Trade"):
             file=discord.File(fp=io.BytesIO(trade_response.image), filename="roomcode.png"),
         )
 
-    request_group = app_commands.Group(name="request", description="...")
     requestfor_group = app_commands.Group(name="requestfor", description="...")
 
-    @request_group.command(name="chip")
-    @app_commands.autocomplete(chip_name=autocomplete.chip_autocomplete)
-    @app_commands.autocomplete(chip_code=autocomplete.chipcode_autocomplete)
-    @in_channel
+    @request_group.command(name="chip", description="Request a chip")
+    @app_commands.autocomplete(chip_name=autocomplete.chip_autocomplete, chip_code=autocomplete.chipcode_autocomplete)
     async def request_chip(
-        self, interaction: discord.Interaction, game: SupportedGameLiteral, chip_name: str, chip_code: str
-    ) -> None:
-        await self._handle_request_chip(interaction, interaction.user, game, chip_name, chip_code)
-
-    @requestfor_group.command(name="chip")
-    @app_commands.autocomplete(chip_name=autocomplete.chip_autocomplete)
-    @app_commands.autocomplete(chip_code=autocomplete.chipcode_autocomplete)
-    @commands.is_owner()
-    @in_channel
-    async def requestfor_chip(
         self,
         interaction: discord.Interaction,
-        user: discord.User,
+        system: SupportedPlatformLiteral,
         game: SupportedGameLiteral,
         chip_name: str,
         chip_code: str,
     ) -> None:
-        await self._handle_request_chip(interaction, user, game, chip_name, chip_code)
+        is_admin = interaction.user.guild_permissions.manage_messages
+        await self._handle_request_chip(interaction, interaction.user, system, game, chip_name, chip_code, 0, is_admin)
+
+    @requestfor_group.command(name="chip", description="Request a chip for someone")
+    @app_commands.autocomplete(chip_name=autocomplete.chip_autocomplete, chip_code=autocomplete.chipcode_autocomplete)
+    @app_commands.default_permissions(manage_messages=True)
+    @app_commands.checks.has_permissions(manage_messages=True)
+    async def requestfor_chip(
+        self,
+        interaction: discord.Interaction,
+        user: discord.User,
+        system: SupportedPlatformLiteral,
+        game: SupportedGameLiteral,
+        chip_name: str,
+        chip_code: str,
+        priority: Optional[int] = 0,
+    ) -> None:
+        await self._handle_request_chip(interaction, user, system, game, chip_name, chip_code, priority, True)
 
     async def _handle_request_chip(
         self,
         interaction: discord.Interaction,
         user: discord.User,
+        system: SupportedPlatformLiteral,
         game: SupportedGameLiteral,
         chip_name: str,
         chip_code: str,
+        priority: int,
+        is_admin: bool,
     ):
         try:
             if chip_code == "*":
@@ -199,6 +244,7 @@ class TradeCog(commands.Cog, name="Trade"):
             return
 
         chip = GAME_INFO[game].get_tradable_chip(chip_name, actual_chip_code)
+        illegal_chip = GAME_INFO[game].get_illegal_chip(chip_name, actual_chip_code)
         if chip is None:
             chip = GAME_INFO[game].get_chip(chip_name, actual_chip_code)
             if chip is None:
@@ -207,40 +253,60 @@ class TradeCog(commands.Cog, name="Trade"):
                 error = f"{Emotes.ERROR} {chip} cannot be traded in-game."
             await interaction.response.send_message(error, ephemeral=True)
             return
-        await self.request(interaction, user.name, user.id, game, chip)
-        await interaction.response.send_message(f"{Emotes.OK} Your request for `{chip}` has been added to the queue.")
+        elif illegal_chip is not None:
+            await interaction.response.send_message(
+                f"{Emotes.ERROR} {chip} is not obtainable in-game, so it cannot be requested.", ephemeral=True
+            )
+            return
+        existing = await self.request(interaction, user, system, game, chip, priority, is_admin)
+        if existing is None:
+            await interaction.response.send_message(
+                f"{Emotes.OK} Your request for `{chip}` has been added to the queue."
+            )
+        else:
+            await interaction.response.send_message(
+                f"{Emotes.ERROR} You are already in queue for `{existing.trade_item}`"
+            )
 
-    @request_group.command(name="ncp")
-    @app_commands.autocomplete(part_name=autocomplete.ncp_autocomplete)
-    @app_commands.autocomplete(part_color=autocomplete.ncpcolor_autocomplete)
-    @in_channel
+    @request_group.command(name="ncp", description="Request a NaviCust part")
+    @app_commands.autocomplete(part_name=autocomplete.ncp_autocomplete, part_color=autocomplete.ncpcolor_autocomplete)
     async def request_ncp(
-        self, interaction: discord.Interaction, game: SupportedGameLiteral, part_name: str, part_color: ColorLiteral
+        self,
+        interaction: discord.Interaction,
+        system: SupportedPlatformLiteral,
+        game: SupportedGameLiteral,
+        part_name: str,
+        part_color: str,
     ) -> None:
-        await self._handle_request_ncp(interaction, interaction.user, game, part_name, part_color)
+        is_admin = interaction.user.guild_permissions.manage_messages
+        await self._handle_request_ncp(interaction, interaction.user, system, game, part_name, part_color, 0, is_admin)
 
-    @requestfor_group.command(name="ncp")
-    @app_commands.autocomplete(part_name=autocomplete.ncp_autocomplete)
-    @app_commands.autocomplete(part_color=autocomplete.ncpcolor_autocomplete)
-    @commands.is_owner()
-    @in_channel
+    @requestfor_group.command(name="ncp", description="Request a NaviCust part for someone")
+    @app_commands.autocomplete(part_name=autocomplete.ncp_autocomplete, part_color=autocomplete.ncpcolor_autocomplete)
+    @app_commands.default_permissions(manage_messages=True)
+    @app_commands.checks.has_permissions(manage_messages=True)
     async def requestfor_ncp(
         self,
         interaction: discord.Interaction,
         user: discord.User,
+        system: SupportedPlatformLiteral,
         game: SupportedGameLiteral,
         part_name: str,
-        part_color: ColorLiteral,
+        part_color: str,
+        priority: Optional[int] = 0,
     ) -> None:
-        await self._handle_request_ncp(interaction, user, game, part_name, part_color)
+        await self._handle_request_ncp(interaction, user, system, game, part_name, part_color, priority, True)
 
     async def _handle_request_ncp(
         self,
         interaction: discord.Interaction,
         user: discord.User,
+        system: SupportedPlatformLiteral,
         game: SupportedGameLiteral,
         part_name: str,
-        part_color: ColorLiteral,
+        part_color: str,
+        priority: int,
+        is_admin: bool,
     ) -> None:
         try:
             actual_color = GAME_INFO[game].get_color(part_color)
@@ -254,48 +320,104 @@ class TradeCog(commands.Cog, name="Trade"):
         if ncp is None:
             await interaction.response.send_message(f"{Emotes.ERROR} That's not a valid part.", ephemeral=True)
             return
-        await self.request(interaction, user.name, user.id, game, ncp)
-        await interaction.response.send_message(f"{Emotes.OK} Your request for `{ncp}` has been added to the queue.")
+        existing = await self.request(interaction, user, system, game, ncp, priority, is_admin)
+        if existing is None:
+            await interaction.response.send_message(
+                f"{Emotes.OK} Your request for `{ncp}` has been added to the queue."
+            )
+        else:
+            await interaction.response.send_message(
+                f"{Emotes.ERROR} You are already in queue for {existing.trade_item}"
+            )
 
     async def request(
         self,
         interaction: discord.Interaction,
-        user_name: str,
-        user_id: int,
+        user: discord.User,
+        system: SupportedPlatformLiteral,
         game: SupportedGameLiteral,
         trade_item: TradeItem,
-    ):
-        ready, done = await self.trade_request_rpc_client.submit_trade_request(
-            user_name, user_id, interaction.channel_id, "switch", game, trade_item
+        priority: int,
+        is_admin: bool,
+    ) -> Optional[TradeRequest]:
+        _, _, queued_users = self.trade_request_rpc_client.get_current_queue()
+        if user.id in queued_users and not is_admin:
+            return queued_users[user.id]
+        await self.trade_request_rpc_client.submit_trade_request(
+            user.display_name, user.id, interaction.channel_id, system.lower(), game, trade_item, priority
         )
-        ready.add_done_callback(
-            lambda fut: asyncio.run_coroutine_threadsafe(self.message_room_code(fut.result()), self.bot.loop)
-        )
-        done.add_done_callback(
-            lambda fut: asyncio.run_coroutine_threadsafe(self.handle_trade_complete(fut.result()), self.bot.loop)
-        )
-        await self.update_queue_message()
+        return None
 
-    @app_commands.command()
-    @in_channel
+    @app_commands.command(description="Show the queue for pending trades")
+    @app_commands.guild_only()
     async def queue(self, interaction: discord.Interaction):
         embed = self._make_queue_embed(interaction.user)
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
     @app_commands.command()
-    @commands.is_owner()
+    @owner_only()
+    @app_commands.guild_only()
     async def clearqueue(self, interaction: discord.Interaction):
         await self.trade_request_rpc_client.clear_queue()
         await interaction.response.send_message(content=f"Queue cleared.")
 
     @app_commands.command()
-    @commands.is_owner()
+    @owner_only()
+    @app_commands.guild_only()
+    async def resetuser(self, interaction: discord.Interaction, user: discord.User):
+        current_queue, in_progress, queued_users = self.trade_request_rpc_client.get_current_queue()
+
+        for cid, request in current_queue:
+            if request.user_id == user.id:
+                try:
+                    self.trade_request_rpc_client.cached_queue.pop(cid)
+                except KeyError:
+                    pass
+        for cid, response in in_progress:
+            if response.request.user_id == user.id:
+                try:
+                    self.trade_request_rpc_client.in_progress.pop(cid)
+                except KeyError:
+                    pass
+        try:
+            self.trade_request_rpc_client.queued_users.pop(user.id)
+        except KeyError:
+            pass
+        self.trade_request_rpc_client.save_queue()
+        await interaction.response.send_message(content=f"User removed.")
+
+    @app_commands.command()
+    @owner_only()
+    @app_commands.guild_only()
     async def togglegame(self, interaction: discord.Interaction, system: str, game: int, state: bool):
         await self.trade_request_rpc_client.set_game_enabled(system, game, state)
         await interaction.response.send_message(content=f"Trading for {system}/bn{game}: {state}")
 
     @app_commands.command()
-    @in_channel
+    @owner_only()
+    @app_commands.guild_only()
+    async def toggleworker(self, interaction: discord.Interaction, worker_name: str, state: bool):
+        await self.trade_request_rpc_client.set_worker_enabled(worker_name, state)
+        await interaction.response.send_message(content=f"{worker_name} state: {state}")
+
+    @toggleworker.autocomplete("worker_name")
+    async def _autocomplete_worker_name(self, interaction: discord.Interaction, current: str):
+        msgs = self.trade_request_rpc_client.cached_messages
+        workers = set()
+        for key in msgs.keys():
+            match = re.match(r"worker/([A-Za-z0-9_-]+)/available", key)
+            if match:
+                worker_id = match.group(1)
+                workers.add(worker_id)
+
+        return [
+            app_commands.Choice(name=worker_id, value=worker_id)
+            for worker_id in sorted(workers)
+            if worker_id.startswith(current)
+        ]
+
+    @app_commands.command()
+    @app_commands.guild_only()
     async def toptrades(self, interaction: discord.Interaction):
         top_items = self.bot_stats.get_trades_by_trade_count()
         lines = []
@@ -311,7 +433,7 @@ class TradeCog(commands.Cog, name="Trade"):
         await interaction.response.send_message(embed=embed)
 
     @app_commands.command()
-    @in_channel
+    @app_commands.guild_only()
     async def topusers(self, interaction: discord.Interaction):
         top_users = self.bot_stats.get_users_by_trade_count()
 
@@ -336,7 +458,7 @@ class TradeCog(commands.Cog, name="Trade"):
         await interaction.response.send_message(embed=embed)
 
     @app_commands.command()
-    @in_channel
+    @app_commands.guild_only()
     async def trades(self, interaction: discord.Interaction, member: Optional[discord.Member] = None):
         if member is None:
             user_id = interaction.user.id
@@ -365,11 +487,50 @@ class TradeCog(commands.Cog, name="Trade"):
         await interaction.response.send_message(embed=embed)
 
     @app_commands.command()
-    @in_channel
+    @app_commands.guild_only()
     async def tradecount(self, interaction: discord.Interaction):
         await interaction.response.send_message(
             f"I've recorded trades for {self.bot_stats.get_total_trade_count()} things to {self.bot_stats.get_total_user_count()} users."
         )
+
+    @app_commands.command()
+    @app_commands.guild_only()
+    async def listworkers(self, interaction: discord.Interaction):
+        msgs = self.trade_request_rpc_client.cached_messages
+        _, in_progress, _ = self.trade_request_rpc_client.get_current_queue()
+        worker_to_trade_map: Dict[str, TradeResponse] = {trade[1].worker_id: trade[1] for trade in in_progress}
+
+        lines = []
+        for key in msgs.keys():
+            match = re.match(r"worker/([A-Za-z0-9_-]+)/available", key)
+            if match:
+                worker_id = match.group(1)
+                worker_hostname = msgs[f"worker/{worker_id}/hostname"].decode("utf-8")
+                worker_system = (
+                    Emotes.STEAM if msgs[f"worker/{worker_id}/system"].decode("utf-8") == "steam" else Emotes.SWITCH
+                )
+                worker_game = msgs[f"worker/{worker_id}/game"].decode("utf-8")
+                worker_enabled = bool(msgs.get(f"worker/{worker_id}/enabled") == b"1")
+                worker_available = bool(msgs[key] == b"1")
+
+                if worker_enabled and worker_available:
+                    if worker_id in worker_to_trade_map:
+                        trade = worker_to_trade_map[worker_id]
+                        status = f"trading: <@{trade.request.user_id}> - {trade.request.trade_item}"
+                    else:
+                        status = "idle"
+                    emote = Emotes.OK
+                elif worker_available and not worker_enabled:
+                    emote = Emotes.WARNING
+                    status = "disabled"
+                else:
+                    emote = Emotes.ERROR
+                    status = "offline"
+                lines.append(
+                    f"{emote} {worker_hostname} ({worker_id[:8]}) - {worker_system} BN{worker_game} ({status})"
+                )
+        embed = discord.Embed(title=f"List of workers ({len(lines)})", description="\n".join(lines))
+        await interaction.response.send_message(embed=embed)
 
     """
     @commands.command()
