@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-DIR="$( dirname -- "${BASH_SOURCE[0]}"; )";   # Get the directory name
-DIR="$( realpath -e -- "$DIR"; )";    # Resolve its full path if need be
+USER="$(whoami)"
 
 appendfile() {
   line=$1
@@ -24,36 +23,40 @@ curl -fsSL https://tailscale.com/install.sh | sh
 tailscale up
 
 
-if [[ ! -d "$DIR/venv" ]] ; then
+if [[ ! -d "$HOME/venv" ]] ; then
   echo "Creating python virtualenv"
   python3 -m pip install virtualenv
-  python3 -m virtualenv "$DIR/venv"
+  python3 -m virtualenv "$HOME/venv"
   git clone https://github.com/wchill/BattleNetworkData
   git clone https://github.com/wchill/MrProgUtils
   git clone https://github.com/wchill/MrProgDiscordBot
-  "$DIR/venv/bin/python" -m pip install -e "$DIR/BattleNetworkData"
-  "$DIR/venv/bin/python" -m pip install -e "$DIR/MrProgUtils"
-  "$DIR/venv/bin/python" -m pip install -e "$DIR/MrProgDiscordBot"
+  "$HOME/venv/bin/python" -m pip install -e "$HOME/BattleNetworkData"
+  "$HOME/venv/bin/python" -m pip install -e "$HOME/MrProgUtils"
+  "$HOME/venv/bin/python" -m pip install -e "$HOME/MrProgDiscordBot"
 fi
 
 
 UNITFILE='/etc/systemd/system/discord-bot.service'
-STARTUP_CMD="$DIR/venv/bin/python $DIR/MrProgDiscordBot/mrprog/bot/bot.py --host $HOST --username $USERNAME --password $PASSWORD --token $TOKEN"
+STARTUP_CMD="$HOME/venv/bin/python -u $HOME/MrProgDiscordBot/src/mrprog/bot/bot.py --host $HOST --username $USERNAME --password $PASSWORD --token $TOKEN 2&>1"
 echo "Writing discord bot service file to $UNITFILE"
 cat << EOF | sudo tee $UNITFILE > /dev/null
 [Unit]
 Description=Mr. Prog Discord Bot
 After=systemd-networkd-wait-online.service
-Wants=systemd-networkd-wait-online.service
 [Service]
 Type=simple
+User=$USER
+Group=$USER
+WorkingDirectory=~
 ExecStart=$STARTUP_CMD
+ExecStop=killall -u $USER $HOME/venv/bin/python
 Restart=always
-StandardOutput=journal+console
+StandardOutput=journal
+StandardError=inherit
 [Install]
 WantedBy=sysinit.target
 EOF
 systemctl daemon-reload
-systemctl enable trade-worker
+systemctl enable discord-bot
 
 echo "Setup done, you might need to reboot"
