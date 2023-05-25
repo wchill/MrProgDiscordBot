@@ -5,8 +5,6 @@ from discord import app_commands
 from mmbn.gamedata.chip import Code
 from mrprog.utils.supported_games import GAME_INFO
 
-from . import fuzzy
-
 Choice = TypeVar("Choice")
 
 
@@ -28,47 +26,43 @@ def limit(choices: List[Choice]) -> List[Choice]:
 async def chip_autocomplete(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
     game = autocomplete_get_game(interaction)
 
-    all_chip_names = sorted(list({chip.name for chip in GAME_INFO[game].all_chips}))
-    if not current:
-        return limit([app_commands.Choice(name=name, value=name) for name in all_chip_names])
-
-    matches = fuzzy.extract(current, choices=all_chip_names, limit=5, score_cutoff=20)
-
-    ret: list[app_commands.Choice[str]] = []
-    for name, _ in matches:
-        ret.append(app_commands.Choice(name=name, value=name))
-
-    return limit(ret)
+    all_chips = dict(sorted({chip.name.lower(): chip for chip in GAME_INFO[game].all_chips}.items()))
+    return limit(
+        [
+            app_commands.Choice(name=chip.name, value=chip.name)
+            for name_lower, chip in all_chips.items()
+            if name_lower.startswith(current.lower())
+        ]
+    )
 
 
 async def chipcode_autocomplete(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
     game = autocomplete_get_game(interaction)
 
     chips = GAME_INFO[game].get_chips_by_name(interaction.namespace["chip_name"])
+    codes = [code.name if code != Code.Star else "*" for code in Code]
     if len(chips) == 0:
-        return limit([app_commands.Choice(name=code.name, value=code.name) for code in Code])
+        return limit([app_commands.Choice(name=code, value=code) for code in codes])
 
-    return [app_commands.Choice(name=chip.code.name, value=chip.code.name) for chip in chips]
+    codes = [chip.code.name if chip.code != Code.Star else "*" for chip in chips]
+    return [app_commands.Choice(name=code, value=code) for code in codes]
 
 
 async def ncp_autocomplete(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
     game = autocomplete_get_game(interaction)
 
-    all_part_names = sorted(list({ncp.name for ncp in GAME_INFO[game].all_parts}))
-    if not current:
-        return limit([app_commands.Choice(name=name, value=name) for name in all_part_names])
-
-    matches = fuzzy.extract(current, choices=all_part_names, limit=5, score_cutoff=20)
-
-    ret: list[app_commands.Choice[str]] = []
-    for name, _ in matches:
-        ret.append(app_commands.Choice(name=name, value=name))
-
-    return limit(ret)
+    all_parts = dict(sorted({ncp.name.lower(): ncp for ncp in GAME_INFO[game].all_parts}.items()))
+    return limit(
+        [
+            app_commands.Choice(name=ncp.name, value=ncp.name)
+            for name_lower, ncp in all_parts.items()
+            if name_lower.startswith(current.lower())
+        ]
+    )
 
 
 async def ncpcolor_autocomplete(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
     game = autocomplete_get_game(interaction)
-
-    color_cls = GAME_INFO[game].get_color_class()
-    return [app_commands.Choice(name=color.name, value=color.name) for color in color_cls if color != color_cls.Nothing]
+    parts = GAME_INFO[game].get_parts_by_name(interaction.namespace["part_name"])
+    choices = [app_commands.Choice(name=part.color.name, value=part.color.name) for part in parts]
+    return choices
