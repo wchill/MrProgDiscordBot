@@ -2,10 +2,9 @@ from typing import List, TypeVar
 
 import discord
 from discord import app_commands
+from discord.app_commands import Choice
 from mmbn.gamedata.chip import Code
 from mrprog.utils.supported_games import GAME_INFO
-
-Choice = TypeVar("Choice")
 
 
 def autocomplete_get_game(interaction: discord.Interaction) -> int:
