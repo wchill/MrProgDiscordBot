@@ -1,2 +1,1 @@
-include src/mrprog/gamedata/bn6/chip_images/*
-include src/mrprog/gamedata/bn6/data/*
+include src/mrprog/bot/saves/*
