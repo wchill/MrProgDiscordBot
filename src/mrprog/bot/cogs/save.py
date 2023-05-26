@@ -6,6 +6,8 @@ from discord import app_commands
 from discord.app_commands import Choice
 from discord.ext import commands
 
+from mrprog.bot.utils import Emotes
+
 
 class SaveCog(commands.Cog, name="Save"):
     @app_commands.command(name="save", description="Request a save for the Steam version of BNLC")
@@ -18,9 +20,13 @@ class SaveCog(commands.Cog, name="Save"):
         self,
         interaction: discord.Interaction,
         game: Choice[str],
-        steamid_64_or_32: int
+        steamid_64_or_32: str
     ) -> None:
-        steamid_32 = steamid_64_or_32 & 0xffffffff
+        try:
+            steamid_32 = int(steamid_64_or_32) & 0xffffffff
+        except ValueError:
+            await interaction.response.send_message(content=f"{Emotes.ERROR} Invalid steam ID.", ephemeral=True)
+            return
         steam_id_bytes = steamid_32.to_bytes(4, "little")
 
         encrypted = pkgutil.get_data("mrprog/bot/saves", f"{game}_save_0.bin")
