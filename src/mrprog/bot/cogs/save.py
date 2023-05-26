@@ -7,7 +7,7 @@ from discord.app_commands import Choice
 from discord.ext import commands
 
 
-class TradeCog(commands.Cog, name="Trade"):
+class SaveCog(commands.Cog, name="Save"):
     @app_commands.command(name="save", description="Request a save for the Steam version of BNLC")
     @app_commands.guild_only()
     @app_commands.choices(game=[
@@ -47,3 +47,7 @@ class TradeCog(commands.Cog, name="Trade"):
         for i in range(len(b1)):
             result[i] ^= xor
         return result
+
+
+async def setup(bot: commands.Bot) -> None:
+    await bot.add_cog(SaveCog(bot))
