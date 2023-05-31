@@ -2,9 +2,9 @@ from typing import List, TypeVar
 
 import discord
 from discord import app_commands
-from discord.app_commands import Choice
 from mmbn.gamedata.chip import Code
 from mrprog.utils.supported_games import GAME_INFO
+from mrprog.utils.types import TradeItem
 
 
 def autocomplete_get_game(interaction: discord.Interaction) -> int:
@@ -16,23 +16,32 @@ def autocomplete_get_game(interaction: discord.Interaction) -> int:
         return 6
 
 
-def limit(choices: List[Choice]) -> List[Choice]:
+def limit(choices: list[app_commands.Choice[str]]) -> list[app_commands.Choice[str]]:
     if len(choices) <= 25:
         return choices
     return choices[:25]
 
 
-async def chip_autocomplete(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
-    game = autocomplete_get_game(interaction)
-
-    all_chips = dict(sorted({chip.name.lower(): chip for chip in GAME_INFO[game].all_chips}.items()))
+def _make_choices(items: list[TradeItem], current: str) -> list[app_commands.Choice[str]]:
+    items_dict = dict(sorted({item.name.lower(): item for item in items}.items()))
+    lower = current.lower()
     return limit(
         [
-            app_commands.Choice(name=chip.name, value=chip.name)
-            for name_lower, chip in all_chips.items()
-            if name_lower.startswith(current.lower())
+            app_commands.Choice(name=item.name, value=item.name)
+            for name_lower, item in items_dict.items()
+            if name_lower.startswith(lower)
         ]
     )
+
+
+async def chip_autocomplete(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
+    game = autocomplete_get_game(interaction)
+    return _make_choices(GAME_INFO[game].all_chips, current)
+
+
+async def chip_autocomplete_restricted(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
+    game = autocomplete_get_game(interaction)
+    return _make_choices(GAME_INFO[game].all_tradable_legal_chips, current)
 
 
 async def chipcode_autocomplete(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
@@ -49,15 +58,12 @@ async def chipcode_autocomplete(interaction: discord.Interaction, current: str) 
 
 async def ncp_autocomplete(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
     game = autocomplete_get_game(interaction)
+    return _make_choices(GAME_INFO[game].all_parts, current)
 
-    all_parts = dict(sorted({ncp.name.lower(): ncp for ncp in GAME_INFO[game].all_parts}.items()))
-    return limit(
-        [
-            app_commands.Choice(name=ncp.name, value=ncp.name)
-            for name_lower, ncp in all_parts.items()
-            if name_lower.startswith(current.lower())
-        ]
-    )
+
+async def ncp_autocomplete_restricted(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
+    game = autocomplete_get_game(interaction)
+    return _make_choices(GAME_INFO[game].tradable_parts, current)
 
 
 async def ncpcolor_autocomplete(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:

@@ -187,7 +187,7 @@ class TradeCog(commands.Cog, name="Trade"):
     async def message_room_code(self, trade_response: TradeResponse):
         user = await self.bot.fetch_user(trade_response.request.user_id)
         await user.send(
-            f"Your `{trade_response.request.trade_item}` is ready! You have 180 seconds to join",
+            f"Your `{trade_response.request.trade_item}` is ready! You have 3 minutes to join",
             silent=False,
             file=discord.File(fp=io.BytesIO(trade_response.image), filename="roomcode.png"),
         )
@@ -195,7 +195,7 @@ class TradeCog(commands.Cog, name="Trade"):
     requestfor_group = app_commands.Group(name="requestfor", description="...")
 
     @request_group.command(name="chip", description="Request a chip")
-    @app_commands.autocomplete(chip_name=autocomplete.chip_autocomplete, chip_code=autocomplete.chipcode_autocomplete)
+    @app_commands.autocomplete(chip_name=autocomplete.chip_autocomplete_restricted, chip_code=autocomplete.chipcode_autocomplete)
     async def request_chip(
         self,
         interaction: discord.Interaction,
@@ -208,7 +208,7 @@ class TradeCog(commands.Cog, name="Trade"):
         await self._handle_request_chip(interaction, interaction.user, system, game, chip_name, chip_code, 0, is_admin)
 
     @requestfor_group.command(name="chip", description="Request a chip for someone")
-    @app_commands.autocomplete(chip_name=autocomplete.chip_autocomplete, chip_code=autocomplete.chipcode_autocomplete)
+    @app_commands.autocomplete(chip_name=autocomplete.chip_autocomplete_restricted, chip_code=autocomplete.chipcode_autocomplete)
     @app_commands.default_permissions(manage_messages=True)
     @app_commands.checks.has_permissions(manage_messages=True)
     async def requestfor_chip(
@@ -269,7 +269,7 @@ class TradeCog(commands.Cog, name="Trade"):
             )
 
     @request_group.command(name="ncp", description="Request a NaviCust part")
-    @app_commands.autocomplete(part_name=autocomplete.ncp_autocomplete, part_color=autocomplete.ncpcolor_autocomplete)
+    @app_commands.autocomplete(part_name=autocomplete.ncp_autocomplete_restricted, part_color=autocomplete.ncpcolor_autocomplete)
     async def request_ncp(
         self,
         interaction: discord.Interaction,
@@ -282,7 +282,7 @@ class TradeCog(commands.Cog, name="Trade"):
         await self._handle_request_ncp(interaction, interaction.user, system, game, part_name, part_color, 0, is_admin)
 
     @requestfor_group.command(name="ncp", description="Request a NaviCust part for someone")
-    @app_commands.autocomplete(part_name=autocomplete.ncp_autocomplete, part_color=autocomplete.ncpcolor_autocomplete)
+    @app_commands.autocomplete(part_name=autocomplete.ncp_autocomplete_restricted, part_color=autocomplete.ncpcolor_autocomplete)
     @app_commands.default_permissions(manage_messages=True)
     @app_commands.checks.has_permissions(manage_messages=True)
     async def requestfor_ncp(
@@ -320,6 +320,11 @@ class TradeCog(commands.Cog, name="Trade"):
         if ncp is None:
             await interaction.response.send_message(f"{Emotes.ERROR} That's not a valid part.", ephemeral=True)
             return
+
+        if ncp not in GAME_INFO[game].tradable_parts:
+            await interaction.response.send_message(f"{Emotes.ERROR} {ncp} is not tradable.", ephemeral=True)
+            return
+
         existing = await self.request(interaction, user, system, game, ncp, priority, is_admin)
         if existing is None:
             await interaction.response.send_message(
