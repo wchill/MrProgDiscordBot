@@ -1,0 +1,29 @@
+name: Deployment
+
+concurrency: production
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+
+jobs:
+  deployment:
+    strategy:
+      matrix:
+        host: [bn-automation]
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Tailscale
+        uses: tailscale/github-action@v1
+        with:
+          authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
+      - name: Login via ssh + run update script
+        uses: garygrossgarten/github-action-ssh@release
+        with:
+          command: /usr/bin/env bash /home/wchill/${{ github.event.repository.name }}/update.sh
+          host: ${{ matrix.host }}
+          username: wchill
+          privateKey: ${{ secrets.PRIVATE_KEY }}
