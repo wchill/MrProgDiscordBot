@@ -14,6 +14,7 @@ import psutil
 from discord import app_commands
 from discord.ext import commands
 
+from ...utils import shell
 from .. import utils
 from ..utils import MessageReaction, owner_only
 
@@ -111,37 +112,6 @@ class AdminCog(commands.Cog, name="Admin"):
         cogs_list = '", "'.join(cogs)
         await interaction.followup.send(content=f'Successfully reloaded {len(cogs)} cogs: "{cogs_list}"')
 
-    @reload_parent_command.command(name="bot")
-    @app_commands.guild_only()
-    @owner_only()
-    async def reload_bot(self, ctx: commands.Context):
-        await ctx.message.add_reaction(MessageReaction.OK.value)
-        await ctx.reply("Restarting the bot now!")
-        self.save_restart_context(ctx)
-
-        os.system("systemctl restart discord-bot")
-
-    @reload_parent_command.command(name="system")
-    @app_commands.guild_only()
-    @owner_only()
-    async def reload_system(self, ctx: commands.Context):
-        await ctx.message.add_reaction(MessageReaction.OK.value)
-        await ctx.reply("Restarting the bot now!")
-        self.save_restart_context(ctx)
-
-        os.system("reboot")
-
-    @reload_parent_command.command(name="code")
-    @app_commands.guild_only()
-    @owner_only()
-    async def update(self, ctx: commands.Context):
-        await ctx.message.add_reaction(MessageReaction.OK.value)
-        await ctx.reply("Updating the bot now!")
-        self.save_restart_context(ctx)
-        await utils.run_shell("git fetch --all && git reset --hard origin/master", cwd=os.path.dirname(__file__))
-
-        os.system("systemctl restart discord-bot")
-
     @staticmethod
     def save_restart_context(ctx: commands.Context) -> None:
         context = {
@@ -203,7 +173,7 @@ class AdminCog(commands.Cog, name="Admin"):
         thread_count = psutil.cpu_count()
 
         if platform.system() == "Windows":
-            output = await utils.run_shell(
+            output = await shell.run_shell(
                 'powershell.exe -c "Get-CimInstance Win32_OperatingSystem | Select Caption, Version | ConvertTo-Json"'
             )
             data = json.loads(output)
@@ -214,7 +184,8 @@ class AdminCog(commands.Cog, name="Admin"):
             os_name = f"{uname.system} {uname.release}"
             os_build = uname.version
 
-        git_version = (await utils.run_shell("git describe --always", cwd=os.path.dirname(__file__))).strip()
+        git_versions = await shell.get_git_versions()
+        git_version_str = "\n".join([f"{item[0]}: `{item[1]}`" for item in git_versions.items()])
 
         embed = discord.Embed(title="Bot status")
         embed.add_field(name="Hostname", value=platform.node())
@@ -231,7 +202,7 @@ class AdminCog(commands.Cog, name="Admin"):
         )
         embed.add_field(name="Python version", value=python_ver)
         embed.add_field(name="Discord.py version", value=discord.__version__)
-        embed.add_field(name="Bot version (git)", value=git_version)
+        embed.add_field(name="Bot version", value=git_version_str)
         embed.add_field(name="Bot uptime", value=str(datetime.timedelta(seconds=uptime)))
         embed.add_field(name="System uptime", value=str(datetime.timedelta(seconds=system_uptime)))
 
