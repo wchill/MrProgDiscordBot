@@ -418,7 +418,7 @@ class TradeCog(commands.Cog, name="Trade"):
             await interaction.response.send_message(f"{Emotes.ERROR} That's not a valid part.", ephemeral=True)
             return
 
-        if ncp not in GAME_INFO[game].tradable_parts:
+        if ncp not in GAME_INFO[game].all_tradable_parts:
             await interaction.response.send_message(f"{Emotes.ERROR} {ncp} is not tradable.", ephemeral=True)
             return
 
