@@ -1,16 +1,22 @@
 import asyncio
+import atexit
 import collections
 import io
 import json
 import logging
 import re
-from typing import Dict, Optional
+from typing import Dict, List, Optional, Tuple
 
 import discord
 from discord import app_commands
 from discord.app_commands import AppCommandError
 from discord.ext import commands, tasks
+from mmbn.gamedata.bn3.bn3_chip import BN3Chip
+from mmbn.gamedata.bn3.bn3_ncp_list import BN3NaviCustPartColor
+from mmbn.gamedata.bn6.bn6_chip import BN6Chip
+from mmbn.gamedata.bn6.bn6_ncp_list import BN6NaviCustPartColor
 from mmbn.gamedata.chip import Code
+from mmbn.gamedata.navicust_part import NaviCustPart
 from mrprog.utils.supported_games import (
     GAME_INFO,
     SupportedGameLiteral,
@@ -91,33 +97,49 @@ class TradeCog(commands.Cog, name="Trade"):
         config["queue_message_id"] = str(self.queue_message.id)
 
         await self.trade_request_rpc_client.publish_retained_message("bot/config", json.dumps(config))
+
+        atexit.register(self.atexit_func)
         logger.debug("Trade cog successfully loaded")
 
     async def cog_unload(self) -> None:
+        atexit.unregister(self.atexit_func)
         await self.trade_request_rpc_client.disconnect()
+        self.bot_stats.save("bot_stats.pkl")
+
+    def atexit_func(self) -> None:
+        asyncio.run(self.trade_request_rpc_client.disconnect())
         self.bot_stats.save("bot_stats.pkl")
 
     async def cog_app_command_error(self, interaction: discord.Interaction, error: AppCommandError):
         import traceback
 
-        logger.exception(traceback.format_exception(error))
+        logger.exception("\n".join(traceback.format_exception(error)))
 
     def _make_queue_embed(self, requested_user: Optional[discord.User] = None) -> discord.Embed:
+        queued: List[Tuple[int, TradeRequest]]
+        in_progress: List[Tuple[int, TradeResponse]]
         queued, in_progress, _ = self.trade_request_rpc_client.get_current_queue()
 
-        fields = collections.defaultdict(list)
+        fields: Dict[Tuple[str, int], List[Tuple[int, int, int, TradeItem]]] = collections.defaultdict(list)
         for correlation_id, request in queued:
-            lines = fields[(request.system, request.game)]
-            count = len(lines)
+            trades = fields[(request.system, request.game)]
+            count = len(trades)
 
             if count >= 20:
                 continue
 
-            lines.append(f"{count}. <@{request.user_id}> - `{request.trade_item}`")
+            trades.append((request.priority, count, request.user_id, request.trade_item))
 
         embed = discord.Embed(title=f"Current queue ({len(queued)})")
 
-        for (system, game), lines in sorted(fields.items(), key=lambda kv: kv[0]):
+        for (system, game), trades in sorted(fields.items(), key=lambda kv: kv[0]):
+            trades_sorted = sorted(trades, key=lambda trade: (trade[0], trade[1]))
+            lines = []
+            for position, (priority, _, user_id, trade_item) in enumerate(trades_sorted):
+                if priority > 0:
+                    lines.append(f"{position}. <@{user_id}> - `{trade_item}` (priority {priority})")
+                else:
+                    lines.append(f"{position}. <@{user_id}> - `{trade_item}`")
             system_emote = Emotes.STEAM if system == "steam" else Emotes.SWITCH
             embed.add_field(name=f"{system_emote} BN{game} ({len(lines)})", value="\n".join(lines))
 
@@ -186,11 +208,18 @@ class TradeCog(commands.Cog, name="Trade"):
 
     async def message_room_code(self, trade_response: TradeResponse):
         user = await self.bot.fetch_user(trade_response.request.user_id)
-        await user.send(
-            f"Your `{trade_response.request.trade_item}` is ready! You have 3 minutes to join",
-            silent=False,
-            file=discord.File(fp=io.BytesIO(trade_response.image), filename="roomcode.png"),
-        )
+        try:
+            await user.send(
+                f"Your `{trade_response.request.trade_item}` is ready! You have 3 minutes to join before the trade is cancelled.",
+                silent=False,
+                file=discord.File(fp=io.BytesIO(trade_response.image), filename="roomcode.png"),
+            )
+        except discord.errors.Forbidden:
+            channel = await self.bot.fetch_channel(trade_response.request.channel_id)
+            await channel.send(
+                f"{Emotes.ERROR} <@{trade_response.request.user_id}>: I am unable to send DMs to you. "
+                f"Please enable DMs so I can send you the trade code. Skipping trade."
+            )
 
     requestfor_group = app_commands.Group(name="requestfor", description="...")
 
@@ -431,7 +460,21 @@ class TradeCog(commands.Cog, name="Trade"):
             count += 1
             if count > 20:
                 break
-            lines.append(f"{count}. {trade_item} x{qty}")
+            game = None
+            if isinstance(trade_item, BN3Chip):
+                game = 3
+            elif isinstance(trade_item, BN6Chip):
+                game = 6
+            elif isinstance(trade_item, NaviCustPart):
+                if isinstance(trade_item.color, BN3NaviCustPartColor):
+                    game = 3
+                elif isinstance(trade_item.color, BN6NaviCustPartColor):
+                    game = 6
+
+            if game is None:
+                raise RuntimeError(f"Unknown game: {trade_item}")
+
+            lines.append(f"{count}. `{trade_item}` (BN{game}) x{qty}")
 
         embed = discord.Embed(title="Top trades")
         embed.add_field(name="Top trades", value="\n".join(lines), inline=False)
@@ -446,16 +489,9 @@ class TradeCog(commands.Cog, name="Trade"):
         count = 0
         for user in top_users:
             count += 1
-            if count >= 20:
+            if count > 20:
                 break
-            discord_user = await self.bot.fetch_user(user.user_id)
-            if discord_user is not None:
-                lines.append(
-                    f"{count}. {discord_user.display_name or discord_user.name or discord_user.id} - {user.get_total_trade_count()} trades"
-                )
-            else:
-                if discord_user is not None:
-                    lines.append(f"{count}. {user.user_id} - {user.get_total_trade_count()} trades")
+            lines.append(f"{count}. <@{user.user_id}> - {user.get_total_trade_count()} trades")
 
         embed = discord.Embed(title="Top users by trade count")
         embed.add_field(name="Top users", value="\n".join(lines), inline=False)
