@@ -78,6 +78,7 @@ class TradeCog(commands.Cog, name="Trade"):
         self.bot_stats = BotTradeStats.load_or_default("bot_stats.pkl")
         self.change_status.start()
         self.update_queue.start()
+        self.update_workers.start()
 
         self.trade_request_rpc_client = TradeRequestRpcClient(
             "bn-orchestrator", "worker", "worker", self.message_room_code, self.handle_trade_update
@@ -122,6 +123,9 @@ class TradeCog(commands.Cog, name="Trade"):
 
     async def cog_unload(self) -> None:
         atexit.unregister(self.atexit_func)
+        self.change_status.stop()
+        self.update_queue.stop()
+        self.update_workers.stop()
         await self.trade_request_rpc_client.disconnect()
         self.bot_stats.save("bot_stats.pkl")
 
