@@ -49,7 +49,7 @@ class TradeCog(commands.Cog, name="Trade"):
 
         self.channel_ids = set()
         self.queue_message = None
-        self.queue_message_channel = None
+        self.worker_message = None
 
     @tasks.loop(seconds=60)
     async def change_status(self):
@@ -68,6 +68,12 @@ class TradeCog(commands.Cog, name="Trade"):
             embed = self._make_queue_embed()
             await self.queue_message.edit(content="", embed=embed)
 
+    @tasks.loop(seconds=60)
+    async def update_workers(self):
+        if self.bot.is_ready():
+            embed = self._make_worker_embed(user_requested=True)
+            await self.worker_message.edit(content="", embed=embed)
+
     async def cog_load(self) -> None:
         self.bot_stats = BotTradeStats.load_or_default("bot_stats.pkl")
         self.change_status.start()
@@ -81,22 +87,35 @@ class TradeCog(commands.Cog, name="Trade"):
         config_bytestring = await self.trade_request_rpc_client.wait_for_message("bot/config")
         config = json.loads(config_bytestring.decode("utf-8"))
 
-        channel = await self.bot.fetch_channel(int(config["queue_message_channel"]))
-        embed = self._make_queue_embed()
+        channel = await self.bot.fetch_channel(int(config["status_channel"]))
+        queue_embed = self._make_queue_embed()
+        worker_embed = self._make_worker_embed()
+
         if config.get("queue_message_id") is not None:
             try:
                 queue_message_id = int(config["queue_message_id"])
                 self.queue_message = await channel.fetch_message(queue_message_id)
-                await self.queue_message.edit(content="", embed=embed)
-                logger.debug("Trade cog successfully loaded")
-                return
+                await self.queue_message.edit(content="", embed=queue_embed)
             except Exception:
-                pass
+                self.queue_message = None
 
-        self.queue_message = await channel.send(embed=embed)
-        config["queue_message_id"] = str(self.queue_message.id)
+        if self.queue_message is None:
+            self.queue_message = await channel.send(embed=queue_embed)
+            config["queue_message_id"] = str(self.queue_message.id)
+            await self.trade_request_rpc_client.publish_retained_message("bot/config", json.dumps(config))
 
-        await self.trade_request_rpc_client.publish_retained_message("bot/config", json.dumps(config))
+        if config.get("worker_message_id") is not None:
+            try:
+                worker_message_id = int(config["worker_message_id"])
+                self.worker_message = await channel.fetch_message(worker_message_id)
+                await self.worker_message.edit(content="", embed=worker_embed)
+            except Exception:
+                self.worker_message = None
+
+        if self.worker_message is None:
+            self.worker_message = await channel.send(embed=worker_embed)
+            config["worker_message_id"] = str(self.worker_message.id)
+            await self.trade_request_rpc_client.publish_retained_message("bot/config", json.dumps(config))
 
         atexit.register(self.atexit_func)
         logger.debug("Trade cog successfully loaded")
@@ -173,6 +192,47 @@ class TradeCog(commands.Cog, name="Trade"):
 
         return embed
 
+    def _make_worker_embed(self, user_requested: bool = False) -> discord.Embed:
+        msgs = self.trade_request_rpc_client.cached_messages
+        _, in_progress, _ = self.trade_request_rpc_client.get_current_queue()
+        worker_to_trade_map: Dict[str, TradeResponse] = {trade[1].worker_id: trade[1] for trade in in_progress}
+
+        lines = []
+        for key in msgs.keys():
+            match = re.match(r"worker/([A-Za-z0-9_-]+)/available", key)
+            if match:
+                worker_id = match.group(1)
+                worker_hostname = msgs[f"worker/{worker_id}/hostname"].decode("utf-8")
+                worker_system = (
+                    Emotes.STEAM if msgs[f"worker/{worker_id}/system"].decode("utf-8") == "steam" else Emotes.SWITCH
+                )
+                worker_game = msgs[f"worker/{worker_id}/game"].decode("utf-8")
+                worker_enabled = bool(msgs.get(f"worker/{worker_id}/enabled") == b"1")
+                worker_available = bool(msgs[key] == b"1")
+
+                if worker_enabled and worker_available:
+                    if worker_id in worker_to_trade_map:
+                        trade = worker_to_trade_map[worker_id]
+                        status = f"trading: <@{trade.request.user_id}> - {trade.request.trade_item}"
+                    else:
+                        status = "idle"
+                    emote = Emotes.OK
+                elif worker_available and not worker_enabled:
+                    emote = Emotes.WARNING
+                    status = "disabled"
+                else:
+                    emote = Emotes.ERROR
+                    status = "offline"
+                lines.append(
+                    f"{emote} {worker_hostname} ({worker_id[:8]}) - {worker_system} BN{worker_game} ({status})"
+                )
+        embed = discord.Embed(title=f"List of workers ({len(lines)})", description="\n".join(lines))
+
+        if not user_requested:
+            embed.set_footer(text="This message updates every 60 seconds")
+
+        return embed
+
     async def handle_trade_update(self, trade_response: TradeResponse):
         try:
             await self.bot.wait_until_ready()
@@ -224,7 +284,9 @@ class TradeCog(commands.Cog, name="Trade"):
     requestfor_group = app_commands.Group(name="requestfor", description="...")
 
     @request_group.command(name="chip", description="Request a chip")
-    @app_commands.autocomplete(chip_name=autocomplete.chip_autocomplete_restricted, chip_code=autocomplete.chipcode_autocomplete)
+    @app_commands.autocomplete(
+        chip_name=autocomplete.chip_autocomplete_restricted, chip_code=autocomplete.chipcode_autocomplete
+    )
     async def request_chip(
         self,
         interaction: discord.Interaction,
@@ -237,7 +299,9 @@ class TradeCog(commands.Cog, name="Trade"):
         await self._handle_request_chip(interaction, interaction.user, system, game, chip_name, chip_code, 0, is_admin)
 
     @requestfor_group.command(name="chip", description="Request a chip for someone")
-    @app_commands.autocomplete(chip_name=autocomplete.chip_autocomplete_restricted, chip_code=autocomplete.chipcode_autocomplete)
+    @app_commands.autocomplete(
+        chip_name=autocomplete.chip_autocomplete_restricted, chip_code=autocomplete.chipcode_autocomplete
+    )
     @app_commands.default_permissions(manage_messages=True)
     @app_commands.checks.has_permissions(manage_messages=True)
     async def requestfor_chip(
@@ -298,7 +362,9 @@ class TradeCog(commands.Cog, name="Trade"):
             )
 
     @request_group.command(name="ncp", description="Request a NaviCust part")
-    @app_commands.autocomplete(part_name=autocomplete.ncp_autocomplete_restricted, part_color=autocomplete.ncpcolor_autocomplete)
+    @app_commands.autocomplete(
+        part_name=autocomplete.ncp_autocomplete_restricted, part_color=autocomplete.ncpcolor_autocomplete
+    )
     async def request_ncp(
         self,
         interaction: discord.Interaction,
@@ -311,7 +377,9 @@ class TradeCog(commands.Cog, name="Trade"):
         await self._handle_request_ncp(interaction, interaction.user, system, game, part_name, part_color, 0, is_admin)
 
     @requestfor_group.command(name="ncp", description="Request a NaviCust part for someone")
-    @app_commands.autocomplete(part_name=autocomplete.ncp_autocomplete_restricted, part_color=autocomplete.ncpcolor_autocomplete)
+    @app_commands.autocomplete(
+        part_name=autocomplete.ncp_autocomplete_restricted, part_color=autocomplete.ncpcolor_autocomplete
+    )
     @app_commands.default_permissions(manage_messages=True)
     @app_commands.checks.has_permissions(manage_messages=True)
     async def requestfor_ncp(
@@ -430,25 +498,9 @@ class TradeCog(commands.Cog, name="Trade"):
     @app_commands.command()
     @owner_only()
     @app_commands.guild_only()
-    async def toggleworker(self, interaction: discord.Interaction, worker_name: str, state: bool):
-        await self.trade_request_rpc_client.set_worker_enabled(worker_name, state)
-        await interaction.response.send_message(content=f"{worker_name} state: {state}")
-
-    @toggleworker.autocomplete("worker_name")
-    async def _autocomplete_worker_name(self, interaction: discord.Interaction, current: str):
-        msgs = self.trade_request_rpc_client.cached_messages
-        workers = set()
-        for key in msgs.keys():
-            match = re.match(r"worker/([A-Za-z0-9_-]+)/available", key)
-            if match:
-                worker_id = match.group(1)
-                workers.add(worker_id)
-
-        return [
-            app_commands.Choice(name=worker_id, value=worker_id)
-            for worker_id in sorted(workers)
-            if worker_id.startswith(current)
-        ]
+    async def toggleworker(self, interaction: discord.Interaction, worker_id: str, state: bool):
+        await self.trade_request_rpc_client.set_worker_enabled(worker_id, state)
+        await interaction.response.send_message(content=f"{worker_id} state: {state}")
 
     @app_commands.command()
     @app_commands.guild_only()
@@ -537,41 +589,82 @@ class TradeCog(commands.Cog, name="Trade"):
     @app_commands.command()
     @app_commands.guild_only()
     async def listworkers(self, interaction: discord.Interaction):
+        embed = self._make_worker_embed()
+        await interaction.response.send_message(embed=embed)
+
+    @app_commands.command()
+    @app_commands.guild_only()
+    async def workerstatus(self, interaction: discord.Interaction, worker_id: str):
         msgs = self.trade_request_rpc_client.cached_messages
         _, in_progress, _ = self.trade_request_rpc_client.get_current_queue()
         worker_to_trade_map: Dict[str, TradeResponse] = {trade[1].worker_id: trade[1] for trade in in_progress}
 
-        lines = []
+        worker_hostname = msgs[f"worker/{worker_id}/hostname"].decode("utf-8")
+        worker_system_name = msgs[f"worker/{worker_id}/system"].decode("utf-8")
+        worker_system_emote = Emotes.STEAM if worker_system_name == "steam" else Emotes.SWITCH
+        worker_game = msgs[f"worker/{worker_id}/game"].decode("utf-8")
+        worker_enabled = bool(msgs.get(f"worker/{worker_id}/enabled") == b"1")
+        worker_available = bool(msgs[f"worker/{worker_id}/available"] == b"1")
+        worker_versions = json.loads(msgs[f"worker/{worker_id}/version"].decode("utf-8"))
+        git_version_str = "\n".join([f"{item[0]}: `{item[1]}`" for item in worker_versions.items()])
+
+        if worker_enabled and worker_available:
+            if worker_id in worker_to_trade_map:
+                trade = worker_to_trade_map[worker_id]
+                status = f"Online, trading: <@{trade.request.user_id}> - {trade.request.trade_item}"
+                status_emote = Emotes.OK
+            else:
+                status = "Online, idle"
+                status_emote = Emotes.OK
+        elif worker_available and not worker_enabled:
+            status = "Online, disabled"
+            status_emote = Emotes.WARNING
+        else:
+            status = "Offline"
+            status_emote = Emotes.ERROR
+
+        embed = discord.Embed(title=f"Worker status")
+        embed.add_field(name="Worker ID", value=worker_id)
+        embed.add_field(name="Hostname", value=worker_hostname)
+        embed.add_field(name="System", value=f"{worker_system_emote} {worker_system_name.capitalize()}")
+        embed.add_field(name="Game", value=f"Battle Network {worker_game}")
+        embed.add_field(name="Status", value=f"{status_emote} {status}")
+        embed.add_field(name="Version", value=git_version_str)
+
+        """
+        embed.add_field(
+            name="CPU",
+            value=f"{display_cpu_name} ({architecture}, {clock_speed}, {core_count} cores, {thread_count} threads)",
+        )
+        embed.add_field(name="CPU usage", value=f"Load average (1/5/15 min):\n{load1}, {load5}, {load15}")
+        embed.add_field(name="Memory usage", value=f"{virt_mem[3]/(1024 ** 2):.2f}/{virt_mem[0]/(1024 ** 2):.2f} MB")
+        embed.add_field(
+            name="Disk usage", value=f"{disk_usage.used/(1024 ** 3):.2f}/{disk_usage.total/(1024 ** 3):.2f} GB"
+        )
+        embed.add_field(name="Python version", value=python_ver)
+        embed.add_field(name="Discord.py version", value=discord.__version__)
+        embed.add_field(name="Bot version", value=git_version_str)
+        embed.add_field(name="Bot uptime", value=str(datetime.timedelta(seconds=uptime)))
+        embed.add_field(name="System uptime", value=str(datetime.timedelta(seconds=system_uptime)))
+        """
+        await interaction.response.send_message(embed=embed)
+
+    @toggleworker.autocomplete("worker_id")
+    @workerstatus.autocomplete("worker_id")
+    async def _autocomplete_worker_name(self, interaction: discord.Interaction, current: str):
+        msgs = self.trade_request_rpc_client.cached_messages
+        workers = set()
         for key in msgs.keys():
             match = re.match(r"worker/([A-Za-z0-9_-]+)/available", key)
             if match:
                 worker_id = match.group(1)
-                worker_hostname = msgs[f"worker/{worker_id}/hostname"].decode("utf-8")
-                worker_system = (
-                    Emotes.STEAM if msgs[f"worker/{worker_id}/system"].decode("utf-8") == "steam" else Emotes.SWITCH
-                )
-                worker_game = msgs[f"worker/{worker_id}/game"].decode("utf-8")
-                worker_enabled = bool(msgs.get(f"worker/{worker_id}/enabled") == b"1")
-                worker_available = bool(msgs[key] == b"1")
+                workers.add(worker_id)
 
-                if worker_enabled and worker_available:
-                    if worker_id in worker_to_trade_map:
-                        trade = worker_to_trade_map[worker_id]
-                        status = f"trading: <@{trade.request.user_id}> - {trade.request.trade_item}"
-                    else:
-                        status = "idle"
-                    emote = Emotes.OK
-                elif worker_available and not worker_enabled:
-                    emote = Emotes.WARNING
-                    status = "disabled"
-                else:
-                    emote = Emotes.ERROR
-                    status = "offline"
-                lines.append(
-                    f"{emote} {worker_hostname} ({worker_id[:8]}) - {worker_system} BN{worker_game} ({status})"
-                )
-        embed = discord.Embed(title=f"List of workers ({len(lines)})", description="\n".join(lines))
-        await interaction.response.send_message(embed=embed)
+        return [
+            app_commands.Choice(name=worker_id, value=worker_id)
+            for worker_id in sorted(workers)
+            if worker_id.startswith(current)
+        ]
 
     """
     @commands.command()
