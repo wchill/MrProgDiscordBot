@@ -446,6 +446,10 @@ class TradeCog(commands.Cog, name="Trade"):
         priority: int,
         is_admin: bool,
     ) -> Optional[TradeRequest]:
+        if system == "Steam" and game == 3:
+            await interaction.response.send_message(f"{Emotes.ERROR} Steam BN3 is not supported yet.", ephemeral=True)
+            return
+
         _, _, queued_users = self.trade_request_rpc_client.get_current_queue()
         if user.id in queued_users and not is_admin:
             return queued_users[user.id]
