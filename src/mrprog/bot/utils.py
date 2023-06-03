@@ -20,7 +20,7 @@ class Emotes:
     OK = "✅"
     ERROR = "❌"
     WARNING = "⚠️"
-    STEAM = "<:Steam:1087038464769396836>"
+    STEAM = "<:Steam:1102729564230254643>"
     SWITCH = "<:Switch:1102729586040647710>"
 
 
