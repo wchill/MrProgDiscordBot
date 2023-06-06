@@ -253,7 +253,7 @@ class TradeCog(commands.Cog, name="Trade"):
 
                 if trade_response.message:
                     if trade_response.status in [TradeResponse.FAILURE, TradeResponse.CRITICAL_FAILURE]:
-                        content = f"{emote} <@{trade_response.request.user_id}>: {trade_response.message}\n\n<@{self.bot.owner_id}>"
+                        content = f"{emote} <@{trade_response.request.user_id}>: {trade_response.message}\n\n<@{self.bot.owner_id}> ({trade_response.worker_id})"
                     else:
                         content = f"{emote} <@{trade_response.request.user_id}>: {trade_response.message}"
 
