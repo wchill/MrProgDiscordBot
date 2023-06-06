@@ -29,7 +29,7 @@ class SaveCog(commands.Cog, name="Save"):
             return
         steam_id_bytes = steamid_32.to_bytes(4, "little")
 
-        encrypted = pkgutil.get_data("mrprog/bot/saves", f"{game}_save_0.bin")
+        encrypted = pkgutil.get_data("mrprog.bot", f"saves/{game.value}_save_0.bin")
         xor_byte = encrypted[1]
         decrypted = self.array_xor(encrypted, xor_byte)
 
@@ -41,11 +41,11 @@ class SaveCog(commands.Cog, name="Save"):
         with io.BytesIO() as save_file:
             save_file.write(encrypted_updated)
             save_file.seek(0)
-            save_upload = discord.File(save_file, filename=f"{game}_save_0.bin")
+            save_upload = discord.File(save_file, filename=f"{game.value}_save_0.bin")
 
         await interaction.response.send_message(
-            content=fr"Copy this file to `C:\Program Files (x86)\Steam\userdata\{steamid_32}\1798020\remote\{game}_save_0.bin`.\n"
-                    fr"**MAKE SURE TO MAKE A BACKUP FIRST!**", file=save_upload)
+            content=fr"Copy this file to `C:\Program Files (x86)\Steam\userdata\{steamid_32}\1798020\remote\{game.value}_save_0.bin`."
+                    f"\n**MAKE SURE TO MAKE A BACKUP FIRST!**", file=save_upload, ephemeral=True)
 
     @staticmethod
     def array_xor(b1, xor):

@@ -217,7 +217,7 @@ class TradeCog(commands.Cog, name="Trade"):
                 if worker_enabled and worker_available:
                     if worker_id in worker_to_trade_map:
                         trade = worker_to_trade_map[worker_id]
-                        status = f"trading: <@{trade.request.user_id}> - {trade.request.trade_item}"
+                        status = f"trading: <@{trade.request.user_id}> - `{trade.request.trade_item}`"
                     else:
                         status = "idle"
                     emote = Emotes.OK

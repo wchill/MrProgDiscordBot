@@ -10,7 +10,7 @@ from discord.ext import commands
 from mrprog.utils.logging import install_logger
 
 logger = logging.getLogger(__name__)
-COGS = ["info", "admin", "trade"]
+COGS = ["info", "admin", "trade", "save"]
 
 
 class MrProgBot(discord.ext.commands.Bot):
@@ -28,7 +28,8 @@ bot = MrProgBot()
 
 
 def signal_handler(n, frame):
-    asyncio.run(bot.close())
+    fut = asyncio.run_coroutine_threadsafe(bot.close(), bot.loop)
+    fut.result()
 
 
 async def main():
