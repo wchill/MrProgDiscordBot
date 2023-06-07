@@ -27,11 +27,6 @@ class MrProgBot(discord.ext.commands.Bot):
 bot = MrProgBot()
 
 
-def signal_handler(n, frame):
-    fut = asyncio.run_coroutine_threadsafe(bot.close(), bot.loop)
-    fut.result()
-
-
 async def main():
     parser = argparse.ArgumentParser(prog="Mr. Prog Discord Bot", description="Bot process for Mr. Prog")
     parser.add_argument("--host")
@@ -42,9 +37,6 @@ async def main():
 
     install_logger(args.host, args.username, args.password)
     bot.config = {"host": args.host, "username": args.username, "password": args.password}
-
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
 
     logger.info("Logging in")
     await bot.login(args.token)

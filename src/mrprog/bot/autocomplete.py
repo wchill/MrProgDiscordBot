@@ -63,7 +63,7 @@ async def ncp_autocomplete(interaction: discord.Interaction, current: str) -> li
 
 async def ncp_autocomplete_restricted(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
     game = autocomplete_get_game(interaction)
-    return _make_choices(GAME_INFO[game].all_tradable_parts, current)
+    return _make_choices(GAME_INFO[game].all_tradable_legal_parts, current)
 
 
 async def ncpcolor_autocomplete(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:

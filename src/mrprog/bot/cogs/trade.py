@@ -434,6 +434,12 @@ class TradeCog(commands.Cog, name="Trade"):
             await interaction.response.send_message(f"{Emotes.ERROR} {ncp} is not tradable.", ephemeral=True)
             return
 
+        if ncp in GAME_INFO[game].all_illegal_parts:
+            await interaction.response.send_message(
+                f"{Emotes.ERROR} {ncp} is not obtainable in-game, so it cannot be requested.", ephemeral=True
+            )
+            return
+
         existing = await self.request(interaction, user, system, game, ncp, priority, is_admin)
         if existing is None:
             await interaction.response.send_message(
