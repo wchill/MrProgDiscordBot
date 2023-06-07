@@ -247,6 +247,10 @@ class TradeRequestRpcClient:
             topic=f"worker/{worker_name}/enabled", payload="1" if enabled else "0", qos=1, retain=True
         )
 
+    async def set_bot_enabled(self, enabled: bool) -> None:
+        logger.info(f"Setting bot to {enabled}")
+        await self.mqtt_client.publish(topic=f"bot/enabled", payload="1" if enabled else "0", qos=1, retain=True)
+
     async def disconnect(self) -> None:
         self._mqtt_update_task.cancel()
         try:

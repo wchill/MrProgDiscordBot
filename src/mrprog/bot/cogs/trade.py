@@ -519,6 +519,13 @@ class TradeCog(commands.Cog, name="Trade"):
         await interaction.response.send_message(content=f"{worker_id} state: {state}")
 
     @app_commands.command()
+    @owner_only()
+    @app_commands.guild_only()
+    async def togglebot(self, interaction: discord.Interaction, state: bool):
+        await self.trade_request_rpc_client.set_bot_enabled(state)
+        await interaction.response.send_message(content=f"state: {state}")
+
+    @app_commands.command()
     @app_commands.guild_only()
     async def toptrades(self, interaction: discord.Interaction):
         top_items = self.bot_stats.get_trades_by_trade_count()
