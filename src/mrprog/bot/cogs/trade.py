@@ -71,7 +71,7 @@ class TradeCog(commands.Cog, name="Trade"):
     @tasks.loop(seconds=60)
     async def update_workers(self):
         if self.bot.is_ready():
-            embed = self._make_worker_embed(user_requested=True)
+            embed = self._make_worker_embed(user_requested=False)
             await self.worker_message.edit(content="", embed=embed)
 
     async def cog_load(self) -> None:
@@ -603,7 +603,7 @@ class TradeCog(commands.Cog, name="Trade"):
     @app_commands.command()
     @app_commands.guild_only()
     async def listworkers(self, interaction: discord.Interaction):
-        embed = self._make_worker_embed()
+        embed = self._make_worker_embed(user_requested=True)
         await interaction.response.send_message(embed=embed)
 
     @app_commands.command()
