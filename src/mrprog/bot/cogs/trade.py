@@ -211,8 +211,8 @@ class TradeCog(commands.Cog, name="Trade"):
                     Emotes.STEAM if msgs[f"worker/{worker_id}/system"].decode("utf-8") == "steam" else Emotes.SWITCH
                 )
                 worker_game = msgs[f"worker/{worker_id}/game"].decode("utf-8")
-                worker_enabled = bool(msgs.get(f"worker/{worker_id}/enabled") == b"1")
-                worker_available = bool(msgs[key] == b"1")
+                worker_enabled = msgs.get(f"worker/{worker_id}/enabled") == b"1"
+                worker_available = msgs[key] == b"1"
 
                 if worker_enabled and worker_available:
                     if worker_id in worker_to_trade_map:
@@ -230,6 +230,12 @@ class TradeCog(commands.Cog, name="Trade"):
                 lines.append(
                     f"{emote} {worker_hostname} ({worker_id[:8]}) - {worker_system} BN{worker_game} ({status})"
                 )
+        global_enable = msgs.get("bot/enable", b"0") == b"1"
+        lines.append("")
+        if global_enable:
+            lines.append(f"{Emotes.ERROR} trades currently not being processed")
+        else:
+            lines.append(f"{Emotes.OK} trades currently being processed")
         embed = discord.Embed(title=f"List of workers ({len(lines)})", description="\n".join(lines))
 
         if not user_requested:
