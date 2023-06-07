@@ -230,13 +230,15 @@ class TradeCog(commands.Cog, name="Trade"):
                 lines.append(
                     f"{emote} {worker_hostname} ({worker_id[:8]}) - {worker_system} BN{worker_game} ({status})"
                 )
-        global_enable = msgs.get("bot/enable", b"0") == b"1"
+
+        worker_count = len(lines)
+        global_enable = msgs.get("bot/enabled", b"0") == b"1"
         lines.append("")
         if global_enable:
-            lines.append(f"{Emotes.ERROR} trades currently not being processed")
-        else:
             lines.append(f"{Emotes.OK} trades currently being processed")
-        embed = discord.Embed(title=f"List of workers ({len(lines)})", description="\n".join(lines))
+        else:
+            lines.append(f"{Emotes.ERROR} trades currently not being processed")
+        embed = discord.Embed(title=f"List of workers ({worker_count})", description="\n".join(lines))
 
         if not user_requested:
             embed.set_footer(text="This message updates every 60 seconds")
