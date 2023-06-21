@@ -3,7 +3,9 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import os
 import signal
+import sys
 
 import discord
 from discord.ext import commands
@@ -48,4 +50,10 @@ async def main():
 
 
 if __name__ == "__main__":
+    if sys.platform.lower() == "win32" or os.name.lower() == "nt":
+        # only import if platform/os is win32/nt, otherwise "WindowsSelectorEventLoopPolicy" is not present
+        from asyncio import WindowsSelectorEventLoopPolicy, set_event_loop_policy
+
+        # set the event loop
+        set_event_loop_policy(WindowsSelectorEventLoopPolicy())
     asyncio.run(main())

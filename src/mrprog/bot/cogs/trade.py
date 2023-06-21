@@ -53,26 +53,38 @@ class TradeCog(commands.Cog, name="Trade"):
 
     @tasks.loop(seconds=60)
     async def change_status(self):
-        if self.bot.is_ready():
-            await self.bot.change_presence(
-                status=discord.Status.online,
-                activity=discord.Game(
-                    name=f"{self.bot_stats.get_total_trade_count()} trades to "
-                    f"{self.bot_stats.get_total_user_count()} users",
-                ),
-            )
+        try:
+            if self.bot.is_ready():
+                await self.bot.change_presence(
+                    status=discord.Status.online,
+                    activity=discord.Game(
+                        name=f"{self.bot_stats.get_total_trade_count()} trades to "
+                        f"{self.bot_stats.get_total_user_count()} users",
+                    ),
+                )
+        except Exception:
+            import traceback
+            traceback.print_exc()
 
     @tasks.loop(seconds=10)
     async def update_queue(self):
-        if self.bot.is_ready():
-            embed = self._make_queue_embed()
-            await self.queue_message.edit(content="", embed=embed)
+        try:
+            if self.bot.is_ready():
+                embed = self._make_queue_embed()
+                await self.queue_message.edit(content="", embed=embed)
+        except Exception:
+            import traceback
+            traceback.print_exc()
 
     @tasks.loop(seconds=60)
     async def update_workers(self):
-        if self.bot.is_ready():
-            embed = self._make_worker_embed(user_requested=False)
-            await self.worker_message.edit(content="", embed=embed)
+        try:
+            if self.bot.is_ready():
+                embed = self._make_worker_embed(user_requested=False)
+                await self.worker_message.edit(content="", embed=embed)
+        except Exception:
+            import traceback
+            traceback.print_exc()
 
     async def cog_load(self) -> None:
         self.bot_stats = BotTradeStats.load_or_default("bot_stats.pkl")
@@ -261,7 +273,9 @@ class TradeCog(commands.Cog, name="Trade"):
 
                 if trade_response.message:
                     if trade_response.status in [TradeResponse.FAILURE, TradeResponse.CRITICAL_FAILURE]:
-                        content = f"{emote} <@{trade_response.request.user_id}>: {trade_response.message}\n\n<@{self.bot.owner_id}> ({trade_response.worker_id})"
+                        content = f"{emote} <@{trade_response.request.user_id}>: {trade_response.message}\n" \
+                                  f"Attempting to retry.\n\n" \
+                                  f"<@{self.bot.owner_id}> (worker id {trade_response.worker_id})"
                     else:
                         content = f"{emote} <@{trade_response.request.user_id}>: {trade_response.message}"
 
@@ -355,12 +369,12 @@ class TradeCog(commands.Cog, name="Trade"):
             if chip is None:
                 error = f"{Emotes.ERROR} That's not a valid chip."
             else:
-                error = f"{Emotes.ERROR} {chip} cannot be traded in-game."
+                error = f"{Emotes.ERROR} `{chip}` cannot be traded in-game."
             await interaction.response.send_message(error, ephemeral=True)
             return
         elif illegal_chip is not None:
             await interaction.response.send_message(
-                f"{Emotes.ERROR} {chip} is not obtainable in-game, so it cannot be requested.", ephemeral=True
+                f"{Emotes.ERROR} `{chip}` is not obtainable in-game, so it cannot be requested.", ephemeral=True
             )
             return
         existing = await self.request(interaction, user, system, game, chip, priority, is_admin)
@@ -431,12 +445,12 @@ class TradeCog(commands.Cog, name="Trade"):
             return
 
         if ncp not in GAME_INFO[game].all_tradable_parts:
-            await interaction.response.send_message(f"{Emotes.ERROR} {ncp} is not tradable.", ephemeral=True)
+            await interaction.response.send_message(f"{Emotes.ERROR} `{ncp}` cannot be traded in-game.", ephemeral=True)
             return
 
         if ncp in GAME_INFO[game].all_illegal_parts:
             await interaction.response.send_message(
-                f"{Emotes.ERROR} {ncp} is not obtainable in-game, so it cannot be requested.", ephemeral=True
+                f"{Emotes.ERROR} `{ncp}` is not obtainable in-game, so it cannot be requested.", ephemeral=True
             )
             return
 
