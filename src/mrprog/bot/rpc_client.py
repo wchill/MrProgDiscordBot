@@ -1,9 +1,12 @@
 import asyncio
+import collections
 import hashlib
+import json
 import logging
 import platform
+import re
 import uuid
-from typing import Callable, Dict, List, MutableMapping, Optional, Set, Tuple
+from typing import Callable, Dict, List, Optional, Tuple, Union
 
 import aio_pika
 import asyncio_mqtt
@@ -24,6 +27,109 @@ from mrprog.utils.types import TradeItem
 logger = logging.getLogger(__name__)
 
 
+class WorkerStatus:
+    def __init__(self):
+        self._hostname = ""
+        self._address = ""
+        self._system = ""
+        self._game = 0
+        self._available = False
+        self._enabled = False
+        self._version = {}
+        self._current_trade = None
+
+    def update(self, topic: str, message: bytes):
+        self.__setattr__(topic, message)
+    
+    @property
+    def hostname(self) -> str:
+        return self._hostname
+    
+    @hostname.setter
+    def hostname(self, new_hostname: Union[bytes, str]) -> None:
+        if isinstance(new_hostname, bytes):
+            self._hostname = new_hostname.decode("utf-8")
+        else:
+            self._hostname = new_hostname
+    
+    @property
+    def address(self) -> str:
+        return self._address
+    
+    @address.setter
+    def address(self, new_address: Union[bytes, str]) -> None:
+        if isinstance(new_address, bytes):
+            self._address = new_address.decode("utf-8")
+        else:
+            self._address = new_address
+    
+    @property
+    def system(self) -> str:
+        return self._system
+    
+    @system.setter
+    def system(self, new_system: Union[bytes, str]) -> None:
+        if isinstance(new_system, bytes):
+            self._system = new_system.decode("utf-8")
+        else:
+            self._system = new_system
+    
+    @property
+    def game(self) -> int:
+        return self._game
+    
+    @game.setter
+    def game(self, new_game: Union[bytes, int]) -> None:
+        if isinstance(new_game, bytes):
+            self._game = int(new_game.decode("utf-8"))
+        else:
+            self._game = new_game
+    
+    @property
+    def available(self) -> bool:
+        return self._available
+    
+    @available.setter
+    def available(self, new_available: Union[bytes, bool]) -> None:
+        if isinstance(new_available, bytes):
+            self._available = new_available.decode("utf-8")
+        else:
+            self._available = new_available
+    
+    @property
+    def enabled(self) -> bool:
+        return self._enabled
+    
+    @enabled.setter
+    def enabled(self, new_enabled: Union[bytes, bool]) -> None:
+        if isinstance(new_enabled, bytes):
+            self._enabled = new_enabled.decode("utf-8")
+        else:
+            self._enabled = new_enabled
+    
+    @property
+    def version(self) -> Dict[str, str]:
+        return self._version
+    
+    @version.setter
+    def version(self, new_version: Union[bytes, Dict[str, str]]) -> None:
+        if isinstance(new_version, bytes):
+            self._version = json.loads(new_version.decode("utf-8"))
+        else:
+            self._version = new_version
+    
+    @property
+    def current_trade(self) -> TradeRequest:
+        return self._current_trade
+    
+    @current_trade.setter
+    def current_trade(self, new_current_trade: Union[bytes, TradeRequest]) -> None:
+        if isinstance(new_current_trade, bytes):
+            self._current_trade = TradeRequest.from_bytes(new_current_trade)
+        else:
+            self._current_trade = new_current_trade
+
+
 # noinspection PyTypeChecker
 class TradeRequestRpcClient:
     mqtt_client: asyncio_mqtt.Client
@@ -40,7 +146,6 @@ class TradeRequestRpcClient:
 
         self.request_counter = 0
         self.cached_queue: Dict[str, TradeRequest] = {}
-        self.in_progress: Dict[str, TradeResponse] = {}
 
         self.message_room_code_cb = message_room_code_cb
         self.handle_trade_update_cb = handle_trade_complete_cb
@@ -48,14 +153,8 @@ class TradeRequestRpcClient:
         try:
             with open("cached_queue.json", "r") as f:
                 self.cached_queue = jsonpickle.loads(f.read())
-            with open("in_progress.json", "r") as f:
-                self.in_progress = jsonpickle.loads(f.read())
         except FileNotFoundError:
             pass
-
-        self.queued_users = {req.user_id: req for req in self.cached_queue.values()} | {
-            resp.request.user_id: resp.request for resp in self.in_progress.values()
-        }
 
         self._amqp_connection_str = f"amqp://{username}:{password}@{host}/"
         self._mqtt_connection_info = (host, username, password)
@@ -65,14 +164,11 @@ class TradeRequestRpcClient:
 
         self.topic_callbacks: Dict[str, Callable[[AbstractIncomingMessage], None]] = {}
         self.cached_messages = {}
-
-        self.available_workers = []
+        self.worker_statuses: Dict[str, WorkerStatus] = collections.defaultdict(WorkerStatus)
 
     def save_queue(self):
         with open("cached_queue.json", "w") as f:
             f.write(jsonpickle.dumps(self.cached_queue))
-        with open("in_progress.json", "w") as f:
-            f.write(jsonpickle.dumps(self.in_progress))
 
     async def handle_mqtt_updates(self) -> None:
         async with self.mqtt_client.messages() as messages:
@@ -84,7 +180,13 @@ class TradeRequestRpcClient:
                         self.topic_callbacks[watched_topic](message)
 
     def handle_worker_updates(self, message: asyncio_mqtt.Message) -> None:
-        pass
+        match = re.match(r"worker/([A-Za-z0-9_-]+)/(.*)", message.topic)
+        if not match:
+            logger.warning(f"Unable to match topic: {message.topic}")
+            return
+        worker_id = match.group(1)
+        topic = match.group(2)
+        self.worker_statuses[worker_id].update(topic, message.payload)
 
     async def wait_for_message(self, topic: str) -> bytes:
         if topic in self.cached_messages:
@@ -171,22 +273,11 @@ class TradeRequestRpcClient:
                         self.save_queue()
                     except KeyError:
                         logger.warning(f"Unable to find {message.correlation_id} in cached queue")
-                    if message.correlation_id not in self.in_progress:
-                        await self.message_room_code_cb(response)
-                        self.in_progress[message.correlation_id] = response
                 else:
                     await self.handle_trade_update_cb(response)
             else:
                 try:
                     self.cached_queue.pop(message.correlation_id)
-                except KeyError:
-                    pass
-                try:
-                    self.in_progress.pop(message.correlation_id)
-                except KeyError:
-                    logger.warning(f"Unable to find {message.correlation_id} in progress dict")
-                try:
-                    self.queued_users.pop(response.request.user_id)
                 except KeyError:
                     pass
                 await self.handle_trade_update_cb(response)
@@ -207,7 +298,6 @@ class TradeRequestRpcClient:
             user_name, user_id, channel_id, system, game, self.request_counter, trade_item, priority
         )
         self.cached_queue[correlation_id] = trade_request
-        self.queued_users[user_id] = trade_request
         self.save_queue()
 
         await self.exchange.publish(
@@ -225,14 +315,18 @@ class TradeRequestRpcClient:
 
     def get_current_queue(
         self,
-    ) -> Tuple[List[Tuple[int, TradeRequest]], List[Tuple[int, TradeResponse]], Dict[int, TradeRequest]]:
-        return list(self.cached_queue.items()), list(self.in_progress.items()), self.queued_users
+    ) -> Tuple[List[Tuple[int, TradeRequest]], List[Tuple[str, TradeRequest]], Dict[int, TradeRequest]]:
+        in_progress = []
+        for worker_id, status in self.worker_statuses.items():
+            if status.current_trade:
+                in_progress.append((worker_id, status.current_trade))
+
+        return list(self.cached_queue.items()), in_progress, {resp.request.user_id: resp.request for resp in self.cached_queue.values()}
 
     async def clear_queue(self) -> None:
         for key, task_queue in self.task_queues.items():
             await task_queue.purge()
         self.cached_queue.clear()
-        self.queued_users = {resp.request.user_id: resp.request for resp in self.in_progress.values()}
         self.save_queue()
 
     async def set_game_enabled(self, system: str, game: int, enabled: bool) -> None:

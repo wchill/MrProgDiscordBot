@@ -274,8 +274,7 @@ class TradeCog(commands.Cog, name="Trade"):
                 if trade_response.message:
                     if trade_response.status in [TradeResponse.FAILURE, TradeResponse.CRITICAL_FAILURE]:
                         content = f"{emote} <@{trade_response.request.user_id}>: {trade_response.message}\n" \
-                                  f"Attempting to retry.\n\n" \
-                                  f"<@{self.bot.owner_id}> (worker id {trade_response.worker_id})"
+                                  f"Restarting worker and retrying trade. (Worker id {trade_response.worker_id})"
                     else:
                         content = f"{emote} <@{trade_response.request.user_id}>: {trade_response.message}"
 
