@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import errno
 import logging
 import os
-import signal
 import sys
+import time
 
 import discord
 from discord.ext import commands
@@ -40,13 +41,19 @@ async def main():
     install_logger(args.host, args.username, args.password)
     bot.config = {"host": args.host, "username": args.username, "password": args.password}
 
-    logger.info("Logging in")
-    await bot.login(args.token)
-    for ext in COGS:
-        logger.info(f"Loading {ext}")
-        await bot.load_extension(f"mrprog.bot.cogs.{ext}")
-    logger.info(f"Connecting")
-    await bot.connect()
+    while True:
+        try:
+            logger.info("Logging in")
+            await bot.login(args.token)
+            for ext in COGS:
+                logger.info(f"Loading {ext}")
+                await bot.load_extension(f"mrprog.bot.cogs.{ext}")
+            logger.info(f"Connecting")
+            await bot.connect()
+        except OSError as e:
+            if e.errno == errno.EBUSY:
+                logger.error(msg="Failed to connect, attempting to retry after 60 seconds", exc_info=True)
+                time.sleep(60)
 
 
 if __name__ == "__main__":
