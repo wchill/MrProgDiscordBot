@@ -152,7 +152,7 @@ class TradeCog(commands.Cog, name="Trade"):
 
     def _make_queue_embed(self, requested_user: Optional[discord.User] = None) -> discord.Embed:
         queued: List[Tuple[int, TradeRequest]]
-        in_progress: List[Tuple[int, TradeResponse]]
+        in_progress: List[Tuple[str, TradeRequest]]
         queued, in_progress, _ = self.trade_request_rpc_client.get_current_queue()
 
         fields: Dict[Tuple[str, int], List[Tuple[int, int, int, TradeItem]]] = collections.defaultdict(list)
@@ -180,14 +180,13 @@ class TradeCog(commands.Cog, name="Trade"):
 
         lines = []
         count = 0
-        for user_id, response in in_progress:
+        for worker_id, request in in_progress:
             if count >= 30:
                 break
             count += 1
-            request = response.request
             system_emote = Emotes.STEAM if request.system == "steam" else Emotes.SWITCH
             lines.append(
-                f"{count}. <@{request.user_id}> - `{request.trade_item}` ({system_emote} BN{request.game}, worker {response.worker_id[:8]})"
+                f"{count}. <@{request.user_id}> - `{request.trade_item}` ({system_emote} BN{request.game}, worker {worker_id[:8]})"
             )
         embed.add_field(name="In progress", value="\n".join(lines) if lines else "No one", inline=False)
 
@@ -209,9 +208,11 @@ class TradeCog(commands.Cog, name="Trade"):
         return embed
 
     def _make_worker_embed(self, user_requested: bool = False) -> discord.Embed:
+        in_progress: List[Tuple[str, TradeRequest]]
+
         msgs = self.trade_request_rpc_client.cached_messages
         _, in_progress, _ = self.trade_request_rpc_client.get_current_queue()
-        worker_to_trade_map: Dict[str, TradeResponse] = {trade[1].worker_id: trade[1] for trade in in_progress}
+        worker_to_trade_map: Dict[str, TradeRequest] = {worker_id: request for worker_id, request in in_progress}
 
         lines = []
         for key in msgs.keys():
@@ -229,7 +230,7 @@ class TradeCog(commands.Cog, name="Trade"):
                 if worker_enabled and worker_available:
                     if worker_id in worker_to_trade_map:
                         trade = worker_to_trade_map[worker_id]
-                        status = f"trading: <@{trade.request.user_id}> - `{trade.request.trade_item}`"
+                        status = f"trading: <@{trade.user_id}> - `{trade.trade_item}`"
                     else:
                         status = "idle"
                     emote = Emotes.OK
@@ -498,31 +499,6 @@ class TradeCog(commands.Cog, name="Trade"):
     @app_commands.command()
     @owner_only()
     @app_commands.guild_only()
-    async def resetuser(self, interaction: discord.Interaction, user: discord.User):
-        current_queue, in_progress, queued_users = self.trade_request_rpc_client.get_current_queue()
-
-        for cid, request in current_queue:
-            if request.user_id == user.id:
-                try:
-                    self.trade_request_rpc_client.cached_queue.pop(cid)
-                except KeyError:
-                    pass
-        for cid, response in in_progress:
-            if response.request.user_id == user.id:
-                try:
-                    self.trade_request_rpc_client.in_progress.pop(cid)
-                except KeyError:
-                    pass
-        try:
-            self.trade_request_rpc_client.queued_users.pop(user.id)
-        except KeyError:
-            pass
-        self.trade_request_rpc_client.save_queue()
-        await interaction.response.send_message(content=f"User removed.")
-
-    @app_commands.command()
-    @owner_only()
-    @app_commands.guild_only()
     async def togglegame(self, interaction: discord.Interaction, system: str, game: int, state: bool):
         await self.trade_request_rpc_client.set_game_enabled(system, game, state)
         await interaction.response.send_message(content=f"Trading for {system}/bn{game}: {state}")
@@ -670,22 +646,6 @@ class TradeCog(commands.Cog, name="Trade"):
         embed.add_field(name="Status", value=f"{status_emote} {status}")
         embed.add_field(name="Version", value=git_version_str)
 
-        """
-        embed.add_field(
-            name="CPU",
-            value=f"{display_cpu_name} ({architecture}, {clock_speed}, {core_count} cores, {thread_count} threads)",
-        )
-        embed.add_field(name="CPU usage", value=f"Load average (1/5/15 min):\n{load1}, {load5}, {load15}")
-        embed.add_field(name="Memory usage", value=f"{virt_mem[3]/(1024 ** 2):.2f}/{virt_mem[0]/(1024 ** 2):.2f} MB")
-        embed.add_field(
-            name="Disk usage", value=f"{disk_usage.used/(1024 ** 3):.2f}/{disk_usage.total/(1024 ** 3):.2f} GB"
-        )
-        embed.add_field(name="Python version", value=python_ver)
-        embed.add_field(name="Discord.py version", value=discord.__version__)
-        embed.add_field(name="Bot version", value=git_version_str)
-        embed.add_field(name="Bot uptime", value=str(datetime.timedelta(seconds=uptime)))
-        embed.add_field(name="System uptime", value=str(datetime.timedelta(seconds=system_uptime)))
-        """
         await interaction.response.send_message(embed=embed)
 
     @toggleworker.autocomplete("worker_id")

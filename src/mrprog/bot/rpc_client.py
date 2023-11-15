@@ -6,6 +6,7 @@ import logging
 import platform
 import re
 import uuid
+from collections import OrderedDict
 from typing import Callable, Dict, List, Optional, Tuple, Union
 
 import aio_pika
@@ -150,12 +151,6 @@ class TradeRequestRpcClient:
         self.message_room_code_cb = message_room_code_cb
         self.handle_trade_update_cb = handle_trade_complete_cb
 
-        try:
-            with open("cached_queue.json", "r") as f:
-                self.cached_queue = jsonpickle.loads(f.read())
-        except FileNotFoundError:
-            pass
-
         self._amqp_connection_str = f"amqp://{username}:{password}@{host}/"
         self._mqtt_connection_info = (host, username, password)
 
@@ -165,10 +160,6 @@ class TradeRequestRpcClient:
         self.topic_callbacks: Dict[str, Callable[[AbstractIncomingMessage], None]] = {}
         self.cached_messages = {}
         self.worker_statuses: Dict[str, WorkerStatus] = collections.defaultdict(WorkerStatus)
-
-    def save_queue(self):
-        with open("cached_queue.json", "w") as f:
-            f.write(jsonpickle.dumps(self.cached_queue))
 
     async def handle_mqtt_updates(self) -> None:
         async with self.mqtt_client.messages() as messages:
@@ -180,7 +171,7 @@ class TradeRequestRpcClient:
                         self.topic_callbacks[watched_topic](message)
 
     def handle_worker_updates(self, message: asyncio_mqtt.Message) -> None:
-        match = re.match(r"worker/([A-Za-z0-9_-]+)/(.*)", message.topic)
+        match = re.match(r"worker/([A-Za-z0-9_-]+)/(.*)", str(message.topic))
         if not match:
             logger.warning(f"Unable to match topic: {message.topic}")
             return
@@ -210,15 +201,14 @@ class TradeRequestRpcClient:
                     ip_address = address.address
                     break
 
-        await self.mqtt_client.publish(topic="bot/hostname", payload=platform.node(), qos=1, retain=True)
-        await self.mqtt_client.publish(topic="bot/address", payload=ip_address, qos=1, retain=True)
-        await self.mqtt_client.publish(topic="bot/available", payload="1", qos=1, retain=True)
-
         self.topic_callbacks["worker/#"] = self.handle_worker_updates
         self._mqtt_update_task = self.loop.create_task(self.handle_mqtt_updates())
 
         message = await self.wait_for_message("bot/trade_id")
         self.request_counter = int(message.decode("utf-8"))
+
+        await self.mqtt_client.publish(topic="bot/hostname", payload=platform.node(), qos=1, retain=True)
+        await self.mqtt_client.publish(topic="bot/address", payload=ip_address, qos=1, retain=True)
 
     async def connect(self):
         mqtt_host, mqtt_user, mqtt_pass = self._mqtt_connection_info
@@ -257,6 +247,37 @@ class TradeRequestRpcClient:
         await self.notification_queue.bind(self.exchange, routing_key=self.notification_queue.name)
         await self.notification_queue.consume(self.on_trade_update)
 
+        # Fetch saved messages from all task queues before starting
+        await self.refresh_queue()
+
+        await self.mqtt_client.publish(topic="bot/available", payload="1", qos=1, retain=True)
+
+    async def refresh_queue(self, user_id: Optional[int] = None) -> int:
+        self.cached_queue.clear()
+
+        removed_messages = 0
+
+        with await aio_pika.connect_robust(self._amqp_connection_str, loop=self.loop) as connection:
+            with await connection.channel() as channel:
+                for system in SUPPORTED_GAMES:
+                    for game in SUPPORTED_GAMES[system]:
+                        task_queue = await channel.get_queue(f"{system}_bn{game}_task_queue")
+
+                        while True:
+                            try:
+                                message = await task_queue.get(timeout=5)
+
+                                request = TradeRequest.from_bytes(message.body)
+                                if request.user_id == user_id:
+                                    await message.ack()
+                                    removed_messages += 1
+                                else:
+                                    self.cached_queue[message.correlation_id] = message
+
+                            except aio_pika.exceptions.QueueEmpty:
+                                break
+        return removed_messages
+
     async def on_trade_update(self, message: AbstractIncomingMessage) -> None:
         async with message.process():
             if message.correlation_id is None:
@@ -270,7 +291,6 @@ class TradeRequestRpcClient:
                 if response.image is not None:
                     try:
                         self.cached_queue.pop(message.correlation_id)
-                        self.save_queue()
                     except KeyError:
                         logger.warning(f"Unable to find {message.correlation_id} in cached queue")
                 else:
@@ -298,7 +318,6 @@ class TradeRequestRpcClient:
             user_name, user_id, channel_id, system, game, self.request_counter, trade_item, priority
         )
         self.cached_queue[correlation_id] = trade_request
-        self.save_queue()
 
         await self.exchange.publish(
             Message(
@@ -313,6 +332,10 @@ class TradeRequestRpcClient:
         self.request_counter += 1
         await self.mqtt_client.publish(topic="bot/trade_id", payload=self.request_counter, qos=1, retain=True)
 
+    async def cancel_trade_request(self, user_id: int) -> bool:
+        removed = await self.refresh_queue(user_id)
+        return removed > 0
+
     def get_current_queue(
         self,
     ) -> Tuple[List[Tuple[int, TradeRequest]], List[Tuple[str, TradeRequest]], Dict[int, TradeRequest]]:
@@ -321,13 +344,12 @@ class TradeRequestRpcClient:
             if status.current_trade:
                 in_progress.append((worker_id, status.current_trade))
 
-        return list(self.cached_queue.items()), in_progress, {resp.request.user_id: resp.request for resp in self.cached_queue.values()}
+        return list(self.cached_queue.items()), in_progress, {request.user_id: request for request in self.cached_queue.values()}
 
     async def clear_queue(self) -> None:
         for key, task_queue in self.task_queues.items():
             await task_queue.purge()
         self.cached_queue.clear()
-        self.save_queue()
 
     async def set_game_enabled(self, system: str, game: int, enabled: bool) -> None:
         logger.info(f"Setting game {system} {game} to {enabled}")
@@ -353,4 +375,3 @@ class TradeRequestRpcClient:
             pass
         await self.amqp_connection.close()
         await self.mqtt_client.disconnect()
-        self.save_queue()
