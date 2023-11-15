@@ -260,25 +260,30 @@ class TradeRequestRpcClient:
 
         removed_messages = 0
 
-        with await aio_pika.connect_robust(self._amqp_connection_str, loop=self.loop) as connection:
-            with await connection.channel() as channel:
-                for system in SUPPORTED_GAMES:
-                    for game in SUPPORTED_GAMES[system]:
-                        task_queue = await channel.get_queue(f"{system}_bn{game}_task_queue")
+        connection = await aio_pika.connect_robust(self._amqp_connection_str, loop=self.loop)
+        channel = await connection.channel()
+        
+        for system in SUPPORTED_GAMES:
+            for game in SUPPORTED_GAMES[system]:
+                task_queue = await channel.get_queue(f"{system}_bn{game}_task_queue")
 
-                        while True:
-                            try:
-                                message = await task_queue.get(timeout=5)
+                while True:
+                    try:
+                        message = await task_queue.get(timeout=5)
 
-                                request = TradeRequest.from_bytes(message.body)
-                                if request.user_id == user_id:
-                                    await message.ack()
-                                    removed_messages += 1
-                                else:
-                                    self.cached_queue[message.correlation_id] = message
+                        request = TradeRequest.from_bytes(message.body)
+                        if request.user_id == user_id:
+                            await message.ack()
+                            removed_messages += 1
+                        else:
+                            self.cached_queue[message.correlation_id] = message
 
-                            except aio_pika.exceptions.QueueEmpty:
-                                break
+                    except aio_pika.exceptions.QueueEmpty:
+                        break
+
+        await channel.close()
+        await connection.close()
+
         logger.info(f"Retrieved {len(self.cached_queue)} messages")
         self.queue_modified = True
         return removed_messages
