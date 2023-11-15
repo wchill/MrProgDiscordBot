@@ -45,7 +45,7 @@ class TradeCog(commands.Cog, name="Trade"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-        self.trade_request_rpc_client = None
+        self.trade_request_rpc_client: TradeRequestRpcClient
         self.bot_stats = None
 
         self.channel_ids = set()
@@ -206,8 +206,6 @@ class TradeCog(commands.Cog, name="Trade"):
                     if requested_user.id == user_id:
                         embed.set_footer(text="Your trade is in progress", icon_url=requested_user.display_avatar.url)
                         break
-        else:
-            embed.set_footer(text="This message updates every 10 seconds")
 
         return embed
 
@@ -256,9 +254,6 @@ class TradeCog(commands.Cog, name="Trade"):
         else:
             lines.append(f"{Emotes.ERROR} trades currently not being processed")
         embed = discord.Embed(title=f"List of workers ({worker_count})", description="\n".join(lines))
-
-        if not user_requested:
-            embed.set_footer(text="This message updates every 60 seconds")
 
         return embed
 
@@ -732,6 +727,21 @@ class TradeCog(commands.Cog, name="Trade"):
         else:
             self.trade_manager.request_queue.put(CancelCommand(DiscordContext.create(ctx)))
     """
+
+    @app_commands.command()
+    @app_commands.guild_only()
+    async def cancel(self, interaction: discord.Interaction):
+        _, _, queued_by_user = self.trade_request_rpc_client.get_current_queue()
+        if interaction.user.id not in queued_by_user:
+            await interaction.response.send_message(
+                f"{Emotes.ERROR} You are not in the queue."
+            )
+            return
+
+        await self.trade_request_rpc_client.cancel_trade_request(interaction.user.id)
+        await interaction.response.send_message(
+            f"{Emotes.OK} Your request has been cancelled."
+        )
 
 
 async def setup(bot: commands.Bot) -> None:

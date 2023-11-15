@@ -124,9 +124,12 @@ class WorkerStatus:
         return self._current_trade
     
     @current_trade.setter
-    def current_trade(self, new_current_trade: Union[bytes, TradeRequest]) -> None:
+    def current_trade(self, new_current_trade: Union[bytes, Optional[TradeRequest]]) -> None:
         if isinstance(new_current_trade, bytes):
-            self._current_trade = TradeRequest.from_bytes(new_current_trade)
+            if new_current_trade == b"":
+                self._current_trade = None
+            else:
+                self._current_trade = TradeRequest.from_bytes(new_current_trade)
         else:
             self._current_trade = new_current_trade
 
@@ -179,8 +182,13 @@ class TradeRequestRpcClient:
             return
         worker_id = match.group(1)
         topic = match.group(2)
-        self.worker_statuses[worker_id].update(topic, message.payload)
-        self.worker_status_modified = True
+
+        try:
+            self.worker_statuses[worker_id].update(topic, message.payload)
+            self.worker_status_modified = True
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
 
     async def wait_for_message(self, topic: str) -> bytes:
         if topic in self.cached_messages:
@@ -262,7 +270,7 @@ class TradeRequestRpcClient:
 
         connection = await aio_pika.connect_robust(self._amqp_connection_str, loop=self.loop)
         channel = await connection.channel()
-        
+
         for system in SUPPORTED_GAMES:
             for game in SUPPORTED_GAMES[system]:
                 task_queue = await channel.get_queue(f"{system}_bn{game}_task_queue")
