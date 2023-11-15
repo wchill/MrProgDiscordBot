@@ -147,6 +147,7 @@ class TradeRequestRpcClient:
 
         self.request_counter = 0
         self.cached_queue: Dict[str, TradeRequest] = {}
+        self.queue_modified = False
 
         self.message_room_code_cb = message_room_code_cb
         self.handle_trade_update_cb = handle_trade_complete_cb
@@ -160,6 +161,7 @@ class TradeRequestRpcClient:
         self.topic_callbacks: Dict[str, Callable[[AbstractIncomingMessage], None]] = {}
         self.cached_messages = {}
         self.worker_statuses: Dict[str, WorkerStatus] = collections.defaultdict(WorkerStatus)
+        self.worker_status_modified = False
 
     async def handle_mqtt_updates(self) -> None:
         async with self.mqtt_client.messages() as messages:
@@ -178,6 +180,7 @@ class TradeRequestRpcClient:
         worker_id = match.group(1)
         topic = match.group(2)
         self.worker_statuses[worker_id].update(topic, message.payload)
+        self.worker_status_modified = True
 
     async def wait_for_message(self, topic: str) -> bytes:
         if topic in self.cached_messages:
@@ -276,6 +279,8 @@ class TradeRequestRpcClient:
 
                             except aio_pika.exceptions.QueueEmpty:
                                 break
+        logger.info(f"Retrieved {len(self.cached_queue)} messages")
+        self.queue_modified = True
         return removed_messages
 
     async def on_trade_update(self, message: AbstractIncomingMessage) -> None:
@@ -284,7 +289,7 @@ class TradeRequestRpcClient:
                 logger.warning(f"Bad message {message!r}")
                 return
 
-            logger.debug(f"Received message {message.correlation_id}")
+            logger.info(f"Received message {message.correlation_id}")
 
             response = TradeResponse.from_bytes(message.body)
             if response.status == TradeResponse.IN_PROGRESS:
@@ -293,6 +298,7 @@ class TradeRequestRpcClient:
                         self.cached_queue.pop(message.correlation_id)
                     except KeyError:
                         logger.warning(f"Unable to find {message.correlation_id} in cached queue")
+                    await self.message_room_code_cb(response)
                 else:
                     await self.handle_trade_update_cb(response)
             else:
@@ -301,6 +307,8 @@ class TradeRequestRpcClient:
                 except KeyError:
                     pass
                 await self.handle_trade_update_cb(response)
+
+            self.queue_modified = True
 
     async def submit_trade_request(
         self,
@@ -318,6 +326,7 @@ class TradeRequestRpcClient:
             user_name, user_id, channel_id, system, game, self.request_counter, trade_item, priority
         )
         self.cached_queue[correlation_id] = trade_request
+        self.queue_modified = True
 
         await self.exchange.publish(
             Message(
@@ -350,6 +359,7 @@ class TradeRequestRpcClient:
         for key, task_queue in self.task_queues.items():
             await task_queue.purge()
         self.cached_queue.clear()
+        self.queue_modified = True
 
     async def set_game_enabled(self, system: str, game: int, enabled: bool) -> None:
         logger.info(f"Setting game {system} {game} to {enabled}")

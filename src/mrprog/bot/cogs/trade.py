@@ -5,6 +5,7 @@ import io
 import json
 import logging
 import re
+import time
 from typing import Dict, List, Optional, Tuple
 
 import discord
@@ -51,6 +52,9 @@ class TradeCog(commands.Cog, name="Trade"):
         self.queue_message = None
         self.worker_message = None
 
+        self.time_since_last_queue_update = 0
+        self.time_since_last_worker_update = 0
+
     @tasks.loop(seconds=60)
     async def change_status(self):
         try:
@@ -66,22 +70,23 @@ class TradeCog(commands.Cog, name="Trade"):
             import traceback
             traceback.print_exc()
 
-    @tasks.loop(seconds=10)
-    async def update_queue(self):
+    @tasks.loop(seconds=1)
+    async def update_queue_and_worker_status(self):
         try:
+            t = time.time()
             if self.bot.is_ready():
-                embed = self._make_queue_embed()
-                await self.queue_message.edit(content="", embed=embed)
-        except Exception:
-            import traceback
-            traceback.print_exc()
 
-    @tasks.loop(seconds=60)
-    async def update_workers(self):
-        try:
-            if self.bot.is_ready():
-                embed = self._make_worker_embed(user_requested=False)
-                await self.worker_message.edit(content="", embed=embed)
+                if self.trade_request_rpc_client.queue_modified and (t - self.time_since_last_queue_update > 5):
+                    embed = self._make_queue_embed()
+                    await self.queue_message.edit(content="", embed=embed)
+                    self.trade_request_rpc_client.queue_modified = False
+                    self.time_since_last_queue_update = t
+
+                if self.trade_request_rpc_client.worker_status_modified and (t - self.time_since_last_worker_update > 5):
+                    embed = self._make_worker_embed(user_requested=False)
+                    await self.worker_message.edit(content="", embed=embed)
+                    self.trade_request_rpc_client.worker_status_modified = False
+                    self.time_since_last_worker_update = t
         except Exception:
             import traceback
             traceback.print_exc()
@@ -89,8 +94,7 @@ class TradeCog(commands.Cog, name="Trade"):
     async def cog_load(self) -> None:
         self.bot_stats = BotTradeStats.load_or_default("bot_stats.pkl")
         self.change_status.start()
-        self.update_queue.start()
-        self.update_workers.start()
+        self.update_queue_and_worker_status.start()
 
         self.trade_request_rpc_client = TradeRequestRpcClient(
             "bn-orchestrator", "worker", "worker", self.message_room_code, self.handle_trade_update
