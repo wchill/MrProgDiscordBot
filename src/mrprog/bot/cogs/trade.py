@@ -52,10 +52,9 @@ class TradeCog(commands.Cog, name="Trade"):
         self.queue_message = None
         self.worker_message = None
 
-        self.time_since_last_queue_update = 0
-        self.time_since_last_worker_update = 0
+        self.time_since_last_update = 0
 
-    @tasks.loop(seconds=60)
+    @tasks.loop(seconds=180)
     async def change_status(self):
         try:
             if self.bot.is_ready():
@@ -75,18 +74,17 @@ class TradeCog(commands.Cog, name="Trade"):
         try:
             t = time.time()
             if self.bot.is_ready():
-
-                if self.trade_request_rpc_client.queue_modified and (t - self.time_since_last_queue_update > 5):
+                if self.trade_request_rpc_client.queue_modified and not self.bot.is_ws_ratelimited() and (t - self.time_since_last_update > 1):
                     embed = self._make_queue_embed()
                     await self.queue_message.edit(content="", embed=embed)
                     self.trade_request_rpc_client.queue_modified = False
-                    self.time_since_last_queue_update = t
+                    self.time_since_last_update = t
 
-                if self.trade_request_rpc_client.worker_status_modified and (t - self.time_since_last_worker_update > 5):
+                if self.trade_request_rpc_client.worker_status_modified and not self.bot.is_ws_ratelimited() and (t - self.time_since_last_update > 1):
                     embed = self._make_worker_embed(user_requested=False)
                     await self.worker_message.edit(content="", embed=embed)
                     self.trade_request_rpc_client.worker_status_modified = False
-                    self.time_since_last_worker_update = t
+                    self.time_since_last_update = t
         except Exception:
             import traceback
             traceback.print_exc()

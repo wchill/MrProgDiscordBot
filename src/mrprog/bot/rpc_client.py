@@ -170,7 +170,10 @@ class TradeRequestRpcClient:
         async with self.mqtt_client.messages() as messages:
             await self.mqtt_client.subscribe("#", qos=1)
             async for message in messages:
-                self.cached_messages[str(message.topic)] = message.payload
+                if message.payload is None or message.payload == "":
+                    del self.cached_messages[str(message.topic)]
+                else:
+                    self.cached_messages[str(message.topic)] = message.payload
                 for watched_topic in self.topic_callbacks.keys():
                     if message.topic.matches(watched_topic):
                         self.topic_callbacks[watched_topic](message)
@@ -284,7 +287,7 @@ class TradeRequestRpcClient:
                             await message.ack()
                             removed_messages += 1
                         else:
-                            self.cached_queue[message.correlation_id] = message
+                            self.cached_queue[message.correlation_id] = request
 
                     except aio_pika.exceptions.QueueEmpty:
                         break
