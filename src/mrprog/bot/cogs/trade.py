@@ -182,18 +182,6 @@ class TradeCog(commands.Cog, name="Trade"):
             system_emote = Emotes.STEAM if system == "steam" else Emotes.SWITCH
             embed.add_field(name=f"{system_emote} BN{game} ({len(lines)})", value="\n".join(lines))
 
-        lines = []
-        count = 0
-        for worker_id, request in in_progress:
-            if count >= 30:
-                break
-            count += 1
-            system_emote = Emotes.STEAM if request.system == "steam" else Emotes.SWITCH
-            lines.append(
-                f"{count}. <@{request.user_id}> - `{request.trade_item}` ({system_emote} BN{request.game}, worker {worker_id[:8]})"
-            )
-        embed.add_field(name="In progress", value="\n".join(lines) if lines else "No one", inline=False)
-
         if requested_user is not None:
             for idx, (user_id, response) in enumerate(queued):
                 if requested_user.id == user_id:
