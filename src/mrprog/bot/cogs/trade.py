@@ -364,6 +364,13 @@ class TradeCog(commands.Cog, name="Trade"):
             )
             return
 
+        messages = self.trade_request_rpc_client.cached_messages
+        if messages.get(f"game/{system.lower()}/{game}/enabled", "0") == "0":
+            await interaction.response.send_message(
+                f"{Emotes.ERROR} Trading is currently disabled for this game on this platform."
+            )
+            return
+
         existing = await self.request(interaction, user, system, game, chip, priority, is_admin)
         if existing is None:
             await interaction.response.send_message(
@@ -438,6 +445,13 @@ class TradeCog(commands.Cog, name="Trade"):
         if ncp in NCP_LISTS[game].unobtainable_parts:
             await interaction.response.send_message(
                 f"{Emotes.ERROR} `{ncp}` is not obtainable in-game, so it cannot be requested.", ephemeral=True
+            )
+            return
+
+        messages = self.trade_request_rpc_client.cached_messages
+        if messages.get(f"game/{system.lower()}/{game}/enabled", "0") == "0":
+            await interaction.response.send_message(
+                f"{Emotes.ERROR} Trading is currently disabled for this game on this platform."
             )
             return
 
