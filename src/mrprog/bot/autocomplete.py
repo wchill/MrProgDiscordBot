@@ -1,9 +1,7 @@
-from typing import List, TypeVar
-
 import discord
 from discord import app_commands
 from mmbn.gamedata.chip import Code
-from mrprog.utils.supported_games import GAME_INFO
+from mrprog.bot.supported_games import CHIP_LISTS, NCP_LISTS
 from mrprog.utils.types import TradeItem
 
 
@@ -36,18 +34,18 @@ def _make_choices(items: list[TradeItem], current: str) -> list[app_commands.Cho
 
 async def chip_autocomplete(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
     game = autocomplete_get_game(interaction)
-    return _make_choices(GAME_INFO[game].all_chips, current)
+    return _make_choices(CHIP_LISTS[game].all_chips, current)
 
 
 async def chip_autocomplete_restricted(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
     game = autocomplete_get_game(interaction)
-    return _make_choices(GAME_INFO[game].all_tradable_legal_chips, current)
+    return _make_choices(CHIP_LISTS[game].all_tradable_legal_chips, current)
 
 
 async def chipcode_autocomplete(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
     game = autocomplete_get_game(interaction)
 
-    chips = GAME_INFO[game].get_chips_by_name(interaction.namespace["chip_name"])
+    chips = CHIP_LISTS[game].get_chips_by_name(interaction.namespace["chip_name"])
     codes = [code.name if code != Code.Star else "*" for code in Code]
     if len(chips) == 0:
         return limit([app_commands.Choice(name=code, value=code) for code in codes])
@@ -58,16 +56,16 @@ async def chipcode_autocomplete(interaction: discord.Interaction, current: str) 
 
 async def ncp_autocomplete(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
     game = autocomplete_get_game(interaction)
-    return _make_choices(GAME_INFO[game].all_parts, current)
+    return _make_choices(NCP_LISTS[game].all_parts, current)
 
 
 async def ncp_autocomplete_restricted(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
     game = autocomplete_get_game(interaction)
-    return _make_choices(GAME_INFO[game].all_tradable_legal_parts, current)
+    return _make_choices(NCP_LISTS[game].all_tradable_legal_parts, current)
 
 
 async def ncpcolor_autocomplete(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
     game = autocomplete_get_game(interaction)
-    parts = GAME_INFO[game].get_parts_by_name(interaction.namespace["part_name"])
+    parts = NCP_LISTS[game].get_parts_by_name(interaction.namespace["part_name"])
     choices = [app_commands.Choice(name=part.color.name, value=part.color.name) for part in parts]
     return choices

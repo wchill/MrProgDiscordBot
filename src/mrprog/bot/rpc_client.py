@@ -6,12 +6,10 @@ import logging
 import platform
 import re
 import uuid
-from collections import OrderedDict
 from typing import Callable, Dict, List, Optional, Tuple, Union
 
 import aio_pika
 import asyncio_mqtt
-import jsonpickle
 import psutil
 from aio_pika import Message
 from aio_pika.abc import (
@@ -21,7 +19,7 @@ from aio_pika.abc import (
     AbstractQueue,
     AbstractRobustConnection,
 )
-from mrprog.utils.supported_games import SUPPORTED_GAMES
+from mrprog.bot.supported_games import SUPPORTED_GAMES
 from mrprog.utils.trade import TradeRequest, TradeResponse
 from mrprog.utils.types import TradeItem
 

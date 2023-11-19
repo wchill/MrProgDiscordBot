@@ -1,13 +1,12 @@
 import io
 import logging
-import time
 
 import discord
 from discord import Colour, app_commands
 from discord.ext import commands
 from mmbn.gamedata.chip import Chip, Code
-from mmbn.gamedata.navicust_part import COLORS, ColorLiteral
-from mrprog.utils.supported_games import GAME_INFO, SupportedGameLiteral
+from mmbn.gamedata.navicust_part import COLORS, ColorLiteral, NaviCustColors
+from mrprog.bot.supported_games import SupportedGameLiteral, CHIP_LISTS, NCP_LISTS
 
 from mrprog.bot.utils import Emotes
 
@@ -19,7 +18,6 @@ logger = logging.getLogger(__name__)
 class InfoCog(commands.Cog, name="Info"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self.last_beg = time.time() - 600
         super().__init__()
 
     @commands.Cog.listener()
@@ -38,7 +36,7 @@ class InfoCog(commands.Cog, name="Info"):
             return
 
         matching_chips = []
-        for chip in GAME_INFO[game].all_chips:
+        for chip in CHIP_LISTS[game].all_chips:
             if chip.code == actual_chip_code:
                 matching_chips.append(chip)
 
@@ -52,7 +50,7 @@ class InfoCog(commands.Cog, name="Info"):
     @app_commands.command(description="Describes a chip in the chosen game.")
     @app_commands.autocomplete(chip_name=autocomplete.chip_autocomplete)
     async def chip(self, interaction: discord.Interaction, game: SupportedGameLiteral, chip_name: str):
-        chips = GAME_INFO[game].get_chips_by_name(chip_name)
+        chips = CHIP_LISTS[game].get_chips_by_name(chip_name)
         if len(chips) == 0:
             await interaction.response.send_message(f"{Emotes.ERROR} That chip doesn't exist.", ephemeral=True)
             return
@@ -80,7 +78,7 @@ class InfoCog(commands.Cog, name="Info"):
     @app_commands.command(name="ncp", description="Describes a NaviCust part in the chosen game.")
     @app_commands.autocomplete(part_name=autocomplete.ncp_autocomplete)
     async def ncp(self, interaction: discord.Interaction, game: SupportedGameLiteral, part_name: str):
-        parts = GAME_INFO[game].get_parts_by_name(part_name)
+        parts = NCP_LISTS[game].get_parts_by_name(part_name)
         if len(parts) == 0:
             await interaction.response.send_message(f"{Emotes.ERROR} That part doesn't exist.", ephemeral=True)
             return
@@ -101,16 +99,10 @@ class InfoCog(commands.Cog, name="Info"):
 
     @app_commands.command(description="Lists all NaviCust parts of the same color in the chosen game.")
     async def ncpcolor(self, interaction: discord.Interaction, game: SupportedGameLiteral, color: ColorLiteral):
-        try:
-            actual_color = GAME_INFO[game].get_color(color)
-        except ValueError:
-            await interaction.response.send_message(
-                f'{Emotes.ERROR} "{color}" is not a valid color in BN{game}.', ephemeral=True
-            )
-            return
+        actual_color = NaviCustColors[color]
 
         text = []
-        for part in GAME_INFO[game].all_parts:
+        for part in NCP_LISTS[game].all_parts:
             if part.color == actual_color:
                 text.append(part.name)
 

@@ -17,11 +17,10 @@ from mmbn.gamedata.bn3.bn3_ncp_list import BN3NaviCustPartColor
 from mmbn.gamedata.bn6.bn6_chip import BN6Chip
 from mmbn.gamedata.bn6.bn6_ncp_list import BN6NaviCustPartColor
 from mmbn.gamedata.chip import Code
-from mmbn.gamedata.navicust_part import NaviCustPart
-from mrprog.utils.supported_games import (
-    GAME_INFO,
+from mmbn.gamedata.navicust_part import NaviCustPart, NaviCustColors
+from mrprog.bot.supported_games import (
     SupportedGameLiteral,
-    SupportedPlatformLiteral,
+    SupportedPlatformLiteral, CHIP_LISTS, NCP_LISTS,
 )
 from mrprog.utils.trade import TradeRequest
 from mrprog.utils.types import TradeItem
@@ -347,10 +346,10 @@ class TradeCog(commands.Cog, name="Trade"):
             await interaction.response.send_message(f"{Emotes.ERROR} That code isn't valid.", ephemeral=True)
             return
 
-        chip = GAME_INFO[game].get_tradable_chip(chip_name, actual_chip_code)
-        illegal_chip = GAME_INFO[game].get_illegal_chip(chip_name, actual_chip_code)
+        chip = CHIP_LISTS[game].get_tradable_chip(chip_name, actual_chip_code)
+        illegal_chip = CHIP_LISTS[game].get_unobtainable_chip(chip_name, actual_chip_code)
         if chip is None:
-            chip = GAME_INFO[game].get_chip(chip_name, actual_chip_code)
+            chip = CHIP_LISTS[game].get_chip(chip_name, actual_chip_code)
             if chip is None:
                 error = f"{Emotes.ERROR} That's not a valid chip."
             else:
@@ -417,23 +416,23 @@ class TradeCog(commands.Cog, name="Trade"):
         is_admin: bool,
     ) -> None:
         try:
-            actual_color = GAME_INFO[game].get_color(part_color)
+            actual_color = NaviCustColors[part_color]
         except KeyError:
             await interaction.response.send_message(
                 f'{Emotes.ERROR} "{part_color}" is not a valid color in BN{game}.', ephemeral=True
             )
             return
 
-        ncp = GAME_INFO[game].get_part(part_name, actual_color)
+        ncp = NCP_LISTS[game].get_part(part_name, actual_color)
         if ncp is None:
             await interaction.response.send_message(f"{Emotes.ERROR} That's not a valid part.", ephemeral=True)
             return
 
-        if ncp not in GAME_INFO[game].all_tradable_parts:
+        if ncp not in NCP_LISTS[game].tradable_parts:
             await interaction.response.send_message(f"{Emotes.ERROR} `{ncp}` cannot be traded in-game.", ephemeral=True)
             return
 
-        if ncp in GAME_INFO[game].all_illegal_parts:
+        if ncp in NCP_LISTS[game].unobtainable_parts:
             await interaction.response.send_message(
                 f"{Emotes.ERROR} `{ncp}` is not obtainable in-game, so it cannot be requested.", ephemeral=True
             )
