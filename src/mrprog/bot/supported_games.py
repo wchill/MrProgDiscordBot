@@ -3,8 +3,8 @@ from typing import Literal, Dict
 from mmbn.gamedata.chip_list import ChipList
 from mmbn.gamedata.ncp_list import NcpList
 
-SUPPORTED_GAMES = {"switch": [3, 6], "steam": [3, 6]}
-SupportedGameLiteral = Literal[3, 6]
+SUPPORTED_GAMES = {"switch": [3, 4, 5, 6], "steam": [3, 4, 5, 6]}
+SupportedGameLiteral = Literal[3, 4, 5, 6]
 SupportedPlatformLiteral = Literal["Switch", "Steam"]
 
 

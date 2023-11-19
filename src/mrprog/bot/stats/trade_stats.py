@@ -65,7 +65,7 @@ class BotTradeStats:
 
     @classmethod
     def load_or_default(cls, path: str) -> "BotTradeStats":
-        logger.debug(f"Loading bot stats from {path}")
+        logger.info(f"Loading bot stats from {path}")
         # TODO: Remove this later
         try:
             from mmbn.gamedata.chip import Chip

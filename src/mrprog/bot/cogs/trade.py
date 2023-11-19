@@ -20,7 +20,9 @@ from mmbn.gamedata.chip import Code
 from mmbn.gamedata.navicust_part import NaviCustPart, NaviCustColors
 from mrprog.bot.supported_games import (
     SupportedGameLiteral,
-    SupportedPlatformLiteral, CHIP_LISTS, NCP_LISTS,
+    SupportedPlatformLiteral,
+    CHIP_LISTS,
+    NCP_LISTS,
 )
 from mrprog.utils.trade import TradeRequest
 from mrprog.utils.types import TradeItem
@@ -361,6 +363,7 @@ class TradeCog(commands.Cog, name="Trade"):
                 f"{Emotes.ERROR} `{chip}` is not obtainable in-game, so it cannot be requested.", ephemeral=True
             )
             return
+
         existing = await self.request(interaction, user, system, game, chip, priority, is_admin)
         if existing is None:
             await interaction.response.send_message(
