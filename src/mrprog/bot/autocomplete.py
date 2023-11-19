@@ -39,7 +39,7 @@ async def chip_autocomplete(interaction: discord.Interaction, current: str) -> l
 
 async def chip_autocomplete_restricted(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
     game = autocomplete_get_game(interaction)
-    return _make_choices(CHIP_LISTS[game].all_tradable_legal_chips, current)
+    return _make_choices(CHIP_LISTS[game].tradable_obtainable_chips, current)
 
 
 async def chipcode_autocomplete(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
@@ -61,7 +61,7 @@ async def ncp_autocomplete(interaction: discord.Interaction, current: str) -> li
 
 async def ncp_autocomplete_restricted(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
     game = autocomplete_get_game(interaction)
-    return _make_choices(NCP_LISTS[game].all_tradable_legal_parts, current)
+    return _make_choices(NCP_LISTS[game].tradable_obtainable_parts, current)
 
 
 async def ncpcolor_autocomplete(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
