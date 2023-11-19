@@ -6,7 +6,7 @@ from mrprog.utils.types import TradeItem
 
 
 def autocomplete_get_game(interaction: discord.Interaction) -> int:
-    if interaction.command.name[-1] in ["3", "6"]:
+    if interaction.command.name[-1] in ["3", "4", "5", "6"]:
         return int(interaction.command.name[-1])
     try:
         return interaction.namespace["game"]
