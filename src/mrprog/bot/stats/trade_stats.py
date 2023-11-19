@@ -73,8 +73,8 @@ class BotTradeStats:
                 game: ChipList(game) for game in [1, 2, 3, 4, 5, 6]
             }
             with open(path, "rb") as f:
-                stats = pickle.load(f)
-            for _, uts in stats.items():
+                stats: BotTradeStats = pickle.load(f)
+            for _, uts in stats.users.items():
                 new_trades = {}
                 for item, count in uts.trades.items():
                     if isinstance(item, Chip):
