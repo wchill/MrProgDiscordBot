@@ -3,6 +3,7 @@ import logging
 import pickle
 from typing import Dict, List, Tuple
 
+from mmbn.gamedata.chip_list import ChipList
 from mrprog.utils.types import TradeItem
 
 logger = logging.getLogger(__name__)
@@ -65,9 +66,33 @@ class BotTradeStats:
     @classmethod
     def load_or_default(cls, path: str) -> "BotTradeStats":
         logger.debug(f"Loading bot stats from {path}")
+        # TODO: Remove this later
         try:
+            from mmbn.gamedata.chip import Chip
+            chip_lists = {
+                game: ChipList(game) for game in [1, 2, 3, 4, 5, 6]
+            }
             with open(path, "rb") as f:
-                return pickle.load(f)
+                stats = pickle.load(f)
+            for _, uts in stats.items():
+                new_trades = {}
+                for item, count in uts.trades.items():
+                    if isinstance(item, Chip):
+                        game = int(item.__class__.__name__.replace("BN", "").replace("Chip", ""))
+                        chip = chip_lists[game].get_chip(item.name, item.code)
+
+                        if chip is None:
+                            continue
+
+                        if item.chip_type == 2 and chip.chip_type == Chip.MEGA:
+                            item.chip_type = Chip.MEGA
+                        elif item.chip_type == 3 and chip.chip_type == Chip.GIGA:
+                            item.chip_type = Chip.GIGA
+                    new_trades[item] = count
+                uts.trades = new_trades
+            with open(path, "wb") as f:
+                pickle.dump(stats, f)
+            return stats
         except FileNotFoundError:
             logger.debug("Bot stats don't exist, creating a new one")
             return cls()

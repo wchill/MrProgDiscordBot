@@ -597,7 +597,6 @@ class TradeCog(commands.Cog, name="Trade"):
     async def workerstatus(self, interaction: discord.Interaction, worker_id: str):
         msgs = self.trade_request_rpc_client.cached_messages
         _, in_progress, _ = self.trade_request_rpc_client.get_current_queue()
-        worker_to_trade_map: Dict[str, TradeResponse] = {trade[1].worker_id: trade[1] for trade in in_progress}
 
         worker_hostname = msgs[f"worker/{worker_id}/hostname"].decode("utf-8")
         worker_system_name = msgs[f"worker/{worker_id}/system"].decode("utf-8")
@@ -609,9 +608,9 @@ class TradeCog(commands.Cog, name="Trade"):
         git_version_str = "\n".join([f"{item[0]}: `{item[1]}`" for item in worker_versions.items()])
 
         if worker_enabled and worker_available:
-            if worker_id in worker_to_trade_map:
-                trade = worker_to_trade_map[worker_id]
-                status = f"Online, trading: <@{trade.request.user_id}> - {trade.request.trade_item}"
+            if msgs.get(f"worker/{worker_id}/current_trade"):
+                trade_request = TradeRequest.from_bytes(msgs.get(f"worker/{worker_id}/current_trade"))
+                status = f"Online, trading: <@{trade_request.user_id}> - {trade_request.trade_item}"
                 status_emote = Emotes.OK
             else:
                 status = "Online, idle"
